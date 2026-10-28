@@ -1,0 +1,47 @@
+name: "Bug Report"
+description: "File a bug report, pattern mismatch, or regression in goose-lit"
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue in goose-lit.
+        Please provide sufficient detail for deterministic reproduction.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal Goose code, FileCheck directives, or testcase that reproduces the issue.
+      render: goose
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen according to documentation or LLVM LIT / FileCheck behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior / Logs
+      description: Paste compiler errors, diagnostic output, or test logs here.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: "OS, Goose compiler version (`goose version`), C compiler (gcc, clang)."
+    validations:
+      required: true

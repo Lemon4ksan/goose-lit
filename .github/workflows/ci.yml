@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-licensing:
+    name: Lint and license check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ruff
+        run: |
+          pip install ruff
+
+      - name: Check license headers
+        run: |
+          python tools/licensing.py --check
+
+      - name: Run ruff
+        run: |
+          ruff check tools/
+
+  c-shims:
+    name: Compile C shims
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install clang and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang
+
+      - name: Compile with gcc
+        run: |
+          gcc -Wall -Wextra -Werror -c shim/proc.c
+          rm -f *.o
+
+      - name: Compile with clang
+        run: |
+          clang -Wall -Wextra -Werror -c shim/proc.c
+          rm -f *.o
+
+  verify:
+    name: Verify, Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools and C compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc clang make
+
+      - name: Cache Goose toolchain
+        id: cache-goose
+        uses: actions/cache@v4
+        with:
+          path: ~/.goose
+          key: ${{ runner.os }}-goose-v2026.3
+
+      - name: Verify code formatting
+        run: |
+          goose format --check .
+
+      - name: Typecheck core packages and binary
+        run: |
+          goose check lit.goose
+          goose check bin.goose
+          goose check tests/bench_test.goose
+          goose check tests/filecheck_test.goose
+          goose check tests/inspect_test.goose
+          goose check tests/pipeline_test.goose
+          goose check tests/wire_test.goose
+
+      - name: Build native goose-lit executable
+        run: |
+          mkdir -p bin
+          goose build -O2 -o bin/goose-lit bin.goose
+
+      - name: Execute unit test suites
+        run: |
+          python tools/test_runner.py
+
+      - name: Execute LIT test runner
+        run: |
+          ./bin/goose-lit tests/
+
+      - name: Run G-CRAP risk analysis and generate SARIF
+        run: |
+          ./bin/goose-lit crap tests/pipeline_test.goose --format sarif --out gcrap.sarif
+
+      - name: Upload SARIF report to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: gcrap.sarif
+          category: goose-lit

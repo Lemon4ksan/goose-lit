@@ -18,7 +18,7 @@ Verification runs through four sequential stages:
 +-----------------------------------------------------------------------------+
 | Layer 1: Static risk gate & BCE radar (G-CRAP)                              |
 |   • Lexical and AST analysis (CC, Cog)                                      |
-|   • goose --bce-lines compiler output (elided vs unproven bounds checks)     |
+|   • goose --bce-lines compiler output (elided vs unproven bounds checks)    |
 |   • Branch coverage profiles (.gcrap-cov, LCOV) and regression checks       |
 |   • Archetype flags: PANIC_HAZARD, FALSE_ALARM, COMPLEX_UNTESTED            |
 +-----------------------------------------------------------------------------+
@@ -34,7 +34,7 @@ Verification runs through four sequential stages:
                                       v
 +-----------------------------------------------------------------------------+
 | Layer 3: FileCheck & LIT test runner (lit::check & lit::runner)             |
-|   • // RUN: directive parsing and substitutions (%s, %S, %t, %FileCheck)   |
+|   • // RUN: directive parsing and substitutions (%s, %S, %t, %FileCheck)    |
 |   • CHECK:, CHECK-NEXT:, CHECK-NOT:, CHECK-LABEL:, CHECK-SAME:, CHECK-EMPTY |
 |   • Breadth-first test discovery across directories                         |
 +-----------------------------------------------------------------------------+

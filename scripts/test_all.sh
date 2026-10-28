@@ -21,9 +21,11 @@ echo "goose-lit verification runner"
 echo -e "\n[1/4] Typechecking lit.goose, bin.goose & tests..."
 goose check lit.goose
 goose check bin.goose
+goose check tests/bench_test.goose
 goose check tests/filecheck_test.goose
-goose check tests/wire_test.goose
+goose check tests/inspect_test.goose
 goose check tests/pipeline_test.goose
+goose check tests/wire_test.goose
 echo "  OK: lit.goose, bin.goose & tests typechecked cleanly."
 
 if [[ "${CHECK_ONLY}" -eq 1 ]]; then

@@ -300,4 +300,3 @@ fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
 
     return count;
 }
-

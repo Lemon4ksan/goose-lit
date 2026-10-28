@@ -1,0 +1,31 @@
+name: "Feature Request"
+description: "Suggest a new testing capability, matcher directive, or verification optimization for goose-lit"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement for goose-lit.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: Describe the motivation, test scenario, or verification requirement.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the proposed design, including directive syntax or Goose API signatures.
+      render: goose
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative designs or existing workarounds considered.
+    validations:
+      required: false

@@ -13,4 +13,5 @@
 # Agentic and scratch directories
 .gemini/
 scratch/
+vendor/
 .system_generated/
