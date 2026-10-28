@@ -1,0 +1,303 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Lemon4ksan
+
+// runner/lit_runner.goose - Test discovery, // RUN: directive execution, and substitution.
+namespace lit;
+
+import std;
+import os;
+import core.bytes;
+import core.proc;
+import core.time;
+
+struct RunDirective {
+    line_no: i64 = 0,
+    command: u8[..512] = [],
+}
+
+struct TestResult {
+    file_path: u8[..512] = [],
+    passed: bool = true,
+    total_runs: i64 = 0,
+    failed_runs: i64 = 0,
+    duration_us: i64 = 0,
+    diag: u8[>..] = [],
+}
+
+// Scans a source file for `// RUN: <command>` directives.
+fn parse_run_directives(source: const u8[:], directives: RunDirective[>..]&) -> bool {
+    var cursor: i64 = 0;
+    var line_num: i64 = 1;
+    let n = source.len;
+
+    while cursor < n {
+        var next_nl = cursor;
+        while next_nl < n && source[next_nl] != '\n' {
+            next_nl += 1;
+        }
+
+        let line = crap::trim_ascii(source[cursor..next_nl]);
+        cursor = next_nl + 1;
+
+        if line.len >= 2 && line[0] == '/' && line[1] == '/' {
+            let body = crap::trim_ascii(line[2..]);
+            if crap::slice_starts_with(body, "RUN:") {
+                let cmd_part = crap::trim_ascii(body[4..]);
+                if cmd_part.len > 0 {
+                    var d = RunDirective {
+                        line_no: line_num,
+                        command: [],
+                    };
+                    for b in cmd_part {
+                        if d.command.len < d.command.cap {
+                            d.command.push(b);
+                        }
+                    }
+                    directives.push(d);
+                }
+            }
+        }
+
+        line_num += 1;
+    }
+
+    return directives.len > 0;
+}
+
+// Expands lit substitutions in a command line:
+// %s -> file_path
+// %S -> directory containing file_path
+// %t -> temporary scratch file path
+fn substitute_lit_command(
+    raw_cmd: const u8[:],
+    file_path: const u8[:],
+    out_cmd: u8[>..]&,
+) {
+    var dir_path: u8[>..] = [];
+    var norm_file: u8[>..] = [];
+    crap::normalize_slashes(file_path, norm_file);
+
+    let last_slash = crap::slice_last_index_of_byte(norm_file[..], '/');
+    if last_slash >= 0 {
+        dir_path.append(norm_file[..last_slash]);
+    } else {
+        dir_path.push('.');
+    }
+
+    var prog: u8[>..] = [];
+    arg(0, prog);
+    if prog.len == 0 {
+        prog.append("goose-lit");
+    }
+
+    var i: i64 = 0;
+    let n = raw_cmd.len;
+
+    while i < n {
+        if raw_cmd[i] == '%' {
+            let rem = raw_cmd[i..];
+            if crap::slice_starts_with(rem, "%FileCheck") || crap::slice_starts_with(rem, "%filecheck") {
+                out_cmd.push('"');
+                out_cmd.append(prog[..]);
+                out_cmd.push('"');
+                out_cmd.append(" filecheck");
+                i += 10;
+                continue;
+            } else if crap::slice_starts_with(rem, "%lit") {
+                out_cmd.push('"');
+                out_cmd.append(prog[..]);
+                out_cmd.push('"');
+                i += 4;
+                continue;
+            } else if i + 1 < n {
+                let spec = raw_cmd[i + 1];
+                if spec == 's' {
+                    out_cmd.append(norm_file[..]);
+                    i += 2;
+                    continue;
+                } else if spec == 'S' {
+                    out_cmd.append(dir_path[..]);
+                    i += 2;
+                    continue;
+                } else if spec == 't' {
+                    out_cmd.append(norm_file[..]);
+                    out_cmd.append(".tmp");
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        out_cmd.push(raw_cmd[i]);
+        i += 1;
+    }
+}
+
+// Executes all // RUN: directives in a single test file.
+fn run_single_lit_test(
+    file_path: const u8[:],
+    verbose: bool,
+    res: TestResult&,
+) -> bool {
+    res.file_path.clear();
+    for b in file_path {
+        if res.file_path.len < res.file_path.cap {
+            res.file_path.push(b);
+        }
+    }
+    res.passed = true;
+    res.total_runs = 0;
+    res.failed_runs = 0;
+    res.diag.clear();
+
+    if !file_exists(file_path) {
+        res.passed = false;
+        res.diag.append("File not found: ");
+        res.diag.append(file_path);
+        res.diag.append("\n");
+        return false;
+    }
+
+    var src: u8[>..] = [];
+    if !read_file(file_path, src) || src.len == 0 {
+        res.passed = false;
+        res.diag.append("Failed to read file or file is empty: ");
+        res.diag.append(file_path);
+        res.diag.append("\n");
+        return false;
+    }
+
+    var directives: RunDirective[>..] = [];
+    if !parse_run_directives(src[..], directives) {
+        // Fallback default: if no // RUN: directive, perform goose check
+        var def_dir = RunDirective {
+            line_no: 1,
+            command: [],
+        };
+        let def_cmd = "goose check %s";
+        for b in def_cmd {
+            if def_dir.command.len < def_dir.command.cap {
+                def_dir.command.push(b);
+            }
+        }
+        directives.push(def_dir);
+    }
+
+    let t0 = (crap::monotonic_now().nanos as! i64) / 1000;
+
+    for d in directives {
+        res.total_runs += 1;
+        var cmd: u8[>..] = [];
+        substitute_lit_command(d.command[..], file_path, cmd);
+
+        if verbose {
+            write_stdout("  [RUN line ");
+            var num_b: u8[..32] = [];
+            format(num_b, d.line_no);
+            write_stdout(num_b[..]);
+            write_stdout("] ");
+            write_stdout(cmd[..]);
+            write_stdout("\n");
+        }
+
+        var run_out: u8[>..] = [];
+        let rc = crap::exec_capture(cmd[..], run_out);
+
+        if rc != 0 {
+            res.passed = false;
+            res.failed_runs += 1;
+            res.diag.append("COMMAND FAILED (exit ");
+            var num_b: u8[..32] = [];
+            format(num_b, rc as! i64);
+            res.diag.append(num_b[..]);
+            res.diag.append(") at line ");
+            var l_b: u8[..32] = [];
+            format(l_b, d.line_no);
+            res.diag.append(l_b[..]);
+            res.diag.append(":\n  $ ");
+            res.diag.append(cmd[..]);
+            res.diag.append("\n");
+            if run_out.len > 0 {
+                res.diag.append("Output:\n");
+                res.diag.append(run_out[..]);
+                res.diag.append("\n");
+            }
+        }
+    }
+
+    let t1 = (crap::monotonic_now().nanos as! i64) / 1000;
+    res.duration_us = t1 - t0;
+
+    return res.passed;
+}
+
+// Discovers all test files under a directory tree using an iterative BFS queue.
+fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
+    var count: i64 = 0;
+    var norm: u8[>..] = [];
+    crap::normalize_slashes(dir_path, norm);
+    while norm.len > 1 && norm[norm.len - 1] == '/' {
+        norm.pop();
+    }
+
+    guard is_dir(norm[..]) else {
+        if file_exists(norm[..]) {
+            out_paths.append(norm[..]);
+            out_paths.push('\n');
+            return 1;
+        }
+        return 0;
+    }
+
+    var dir_queue: u8[>..] = [];
+    dir_queue.append(norm[..]);
+    dir_queue.push('\n');
+
+    var queue_cursor: i64 = 0;
+    while queue_cursor < dir_queue.len {
+        var next_nl: i64 = -1;
+        for i in queue_cursor..dir_queue.len {
+            if dir_queue[i] == '\n' {
+                next_nl = i;
+                break;
+            }
+        }
+        guard next_nl >= 0 else { break; }
+
+        let cur_dir = dir_queue[queue_cursor..next_nl];
+        queue_cursor = next_nl + 1;
+
+        var entries: u8[>..] = [];
+        if list_dir(cur_dir, entries) {
+            var line_start: i64 = 0;
+            for j in entries.len {
+                if entries[j] == '\n' {
+                    let name = crap::trim_ascii(entries[line_start..j]);
+                    line_start = j + 1;
+
+                    guard name.len > 0 && name[0] != '.' &&
+                          name != "vendor" && name != "scratch" && name != "bin" &&
+                          name != "build" && name != "target" && name != "node_modules" else { continue; }
+
+                    var child: u8[>..] = [];
+                    child.append(cur_dir);
+                    if !crap::slice_ends_with(cur_dir, "/") && !crap::slice_ends_with(cur_dir, "\\") {
+                        child.push('/');
+                    }
+                    child.append(name);
+
+                    if is_dir(child[..]) {
+                        dir_queue.append(child[..]);
+                        dir_queue.push('\n');
+                    } else if crap::slice_ends_with(name, ".goose") || crap::slice_ends_with(name, ".lit") {
+                        out_paths.append(child[..]);
+                        out_paths.push('\n');
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    return count;
+}
+
