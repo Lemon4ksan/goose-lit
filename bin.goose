@@ -14,6 +14,7 @@ fn print_usage() {
     write_stdout("Subcommands:\n");
     write_stdout("  <path|file.goose>      Run // RUN: test directives in file or directory\n");
     write_stdout("  filecheck <file>       Verify standard input against FileCheck directives in <file>\n");
+    write_stdout("  not <command...>       Execute command and invert exit status (0 -> 1, non-zero -> 0)\n");
     write_stdout("  gate <path|file> [max] Verify G-CRAP complexity and bounds safety gate (default ceiling: 25)\n");
     write_stdout("  crap <path|file>       Run integrated G-CRAP complexity and safety risk radar\n");
     write_stdout("  inspect <file|hex>     Dump byte buffer in hex/ASCII or 128-bit SIMD lanes\n");
@@ -105,6 +106,30 @@ fn main() {
 
     if first == "version" || first == "--version" || first == "-v" {
         write_stdout("goose-lit version 0.1.0\n");
+        return;
+    }
+
+    if first == "not" {
+        guard all_args.len > 2 else {
+            write_stdout("Error: not requires a command to run\n");
+            sys_exit(1);
+            return;
+        }
+        var cmd_str: u8[>..] = [];
+        var idx: i64 = 2;
+        while idx < all_args.len {
+            if idx > 2 { cmd_str.push(' '); }
+            cmd_str.append(all_args[idx]);
+            idx++;
+        }
+        var run_out: u8[>..] = [];
+        let rc = crap::exec_capture(cmd_str[..], run_out);
+        write_stdout(run_out[..]);
+        if rc == 0 {
+            sys_exit(1);
+        } else {
+            sys_exit(0);
+        }
         return;
     }
 

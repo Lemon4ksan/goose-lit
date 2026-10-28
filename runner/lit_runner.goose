@@ -90,18 +90,34 @@ fn substitute_lit_command(
         prog.append("goose-lit");
     }
 
+    var cmd_to_sub = raw_cmd;
+    if crap::slice_starts_with(raw_cmd, "not ") {
+        out_cmd.push('"');
+        out_cmd.append(prog[..]);
+        out_cmd.push('"');
+        out_cmd.append(" not ");
+        cmd_to_sub = raw_cmd[4..];
+    }
+
     var i: i64 = 0;
-    let n = raw_cmd.len;
+    let n = cmd_to_sub.len;
 
     while i < n {
-        if raw_cmd[i] == '%' {
-            let rem = raw_cmd[i..];
+        if cmd_to_sub[i] == '%' {
+            let rem = cmd_to_sub[i..];
             if crap::slice_starts_with(rem, "%FileCheck") || crap::slice_starts_with(rem, "%filecheck") {
                 out_cmd.push('"');
                 out_cmd.append(prog[..]);
                 out_cmd.push('"');
                 out_cmd.append(" filecheck");
                 i += 10;
+                continue;
+            } else if crap::slice_starts_with(rem, "%not") {
+                out_cmd.push('"');
+                out_cmd.append(prog[..]);
+                out_cmd.push('"');
+                out_cmd.append(" not ");
+                i += 4;
                 continue;
             } else if crap::slice_starts_with(rem, "%lit") {
                 out_cmd.push('"');
@@ -110,7 +126,7 @@ fn substitute_lit_command(
                 i += 4;
                 continue;
             } else if i + 1 < n {
-                let spec = raw_cmd[i + 1];
+                let spec = cmd_to_sub[i + 1];
                 if spec == 's' {
                     out_cmd.append(norm_file[..]);
                     i += 2;
@@ -127,7 +143,7 @@ fn substitute_lit_command(
                 }
             }
         }
-        out_cmd.push(raw_cmd[i]);
+        out_cmd.push(cmd_to_sub[i]);
         i += 1;
     }
 }
