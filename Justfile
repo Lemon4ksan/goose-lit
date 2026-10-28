@@ -32,6 +32,15 @@ lit:
 lit:
     .\bin\goose-lit.exe tests/
 
+# Run hardware complexity gate check on target
+[unix]
+gate target="." max="25" cov="0.85":
+    ./bin/goose-lit gate {{target}} {{max}} --cov {{cov}}
+
+[windows]
+gate target="." max="25" cov="0.85":
+    .\bin\goose-lit.exe gate {{target}} {{max}} --cov {{cov}}
+
 # Check SPDX Apache-2.0 license headers
 license-check:
     python tools/licensing.py --check

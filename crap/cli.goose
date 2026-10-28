@@ -18,13 +18,15 @@ import crap.report.formatter;
 import crap.report.ratchet;
 
 fn print_crap_usage() {
-    write_stdout("Usage: goose-lit crap <path|file.goose> [options]\n\n");
+    write_stdout("Usage: goose-lit crap <path|file.goose> [options]\n");
+    write_stdout("       goose-lit gate <path|file.goose> [ceiling] [options]\n\n");
     write_stdout("Goose Change Risk Anti-Pattern (G-CRAP) and Safety Risk Radar.\n\n");
     write_stdout("Analysis & Execution Options:\n");
+    write_stdout("  --gate [val]            Enforce G-CRAP risk gate ceiling (default 25.0, exits with 1 on violation)\n");
     write_stdout("  --cover <test.goose>    Instrument, run test suite, and capture branch coverage\n");
     write_stdout("  --bce-lines [file]      Import pre-captured goose --bce-lines output or auto-run\n");
     write_stdout("  --specs [file]          Import pre-captured goose --specs output or auto-run\n");
-    write_stdout("  --cov <file.gcrap-cov>  Load .gcrap-cov branch coverage profile\n");
+    write_stdout("  --cov <val|file>        Set simulated coverage (0.0..1.0) or load .gcrap-cov profile\n");
     write_stdout("  --lcov <file.info>      Load LCOV tracefile\n");
     write_stdout("  --default-cov <val>     Default coverage for static triage (0.0 to 1.0, default 0.0)\n");
     write_stdout("  --alpha <val>           Safety penalty weight for uncovered bce:keep (default 25.0)\n");
@@ -85,6 +87,12 @@ fn run_crap_cli() -> i32 {
     var cfg = default_risk_config();
     var delta_threshold: f64 = 5.0;
     var include_tests = false;
+    var enforce_gate = false;
+    var gate_ceiling: f64 = 25.0;
+
+    if all_args.len > 1 && all_args[1] == "gate" {
+        enforce_gate = true;
+    }
 
     var i: i64 = 2;
     while i < all_args.len {
@@ -92,6 +100,15 @@ fn run_crap_cli() -> i32 {
         if arg == "--help" || arg == "-h" {
             print_crap_usage();
             return 0;
+        } else if arg == "--gate" {
+            enforce_gate = true;
+            if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "-") {
+                let val, ok = parse_f64_slice(all_args[i + 1]);
+                if ok {
+                    gate_ceiling = val;
+                    i++;
+                }
+            }
         } else if arg == "--include-tests" {
             include_tests = true;
         } else if arg == "--cover" && i + 1 < all_args.len {
@@ -131,9 +148,15 @@ fn run_crap_cli() -> i32 {
                 auto_specs = true;
             }
         } else if arg == "--cov" && i + 1 < all_args.len {
-            cov_files.append(all_args[i + 1]);
-            cov_files.push('\n');
-            cfg.has_coverage_profile = true;
+            let cov_val = all_args[i + 1];
+            let val, ok = parse_f64_slice(cov_val);
+            if ok && val >= 0.0 && val <= 1.0 {
+                cfg.default_cov = val;
+            } else {
+                cov_files.append(cov_val);
+                cov_files.push('\n');
+                cfg.has_coverage_profile = true;
+            }
             i++;
         } else if arg == "--lcov" && i + 1 < all_args.len {
             lcov_file = all_args[i + 1];
@@ -171,8 +194,15 @@ fn run_crap_cli() -> i32 {
             let val, ok = parse_f64_slice(all_args[i + 1]);
             if ok { delta_threshold = val; }
             i++;
-        } else if !slice_starts_with(arg, "--") && target_arg.len == 0 {
-            target_arg = arg;
+        } else if !slice_starts_with(arg, "-") {
+            if target_arg.len == 0 {
+                target_arg = arg;
+            } else if enforce_gate {
+                let val, ok = parse_f64_slice(arg);
+                if ok {
+                    gate_ceiling = val;
+                }
+            }
         }
         i++;
     }
@@ -328,6 +358,72 @@ fn run_crap_cli() -> i32 {
         write_stdout("\n");
     } else {
         write_stdout(report_buf[..]);
+    }
+
+    // 11. Evaluate hardware complexity gate if requested
+    if enforce_gate {
+        var gate_violations: i64 = 0;
+        var gate_report: u8[>..] = [];
+        gate_report.append("\n=== Hardware Complexity Gate Evaluation ===\n");
+        gate_report.append("Ceiling: G-CRAP <= ");
+        append_f64_1(gate_report, gate_ceiling);
+        gate_report.append(", EffCC <= 15, unproven_bce == 0\n\n");
+
+        for fi in functions.len {
+            guard !functions[fi].ignored else { continue; }
+            let g_val = functions[fi].g_crap;
+            let eff = functions[fi].effective_cc;
+            let arch = functions[fi].archetype;
+            let unproven = functions[fi].uncovered_bce_keep;
+
+            var violated = false;
+            var reason: u8[>..] = [];
+
+            if g_val > gate_ceiling {
+                violated = true;
+                reason.append("G-CRAP ");
+                append_f64_1(reason, g_val);
+                reason.append(" > ");
+                append_f64_1(reason, gate_ceiling);
+            }
+            if eff > 15 {
+                if reason.len > 0 { reason.append("; "); }
+                violated = true;
+                reason.append("EffCC ");
+                append_i64(reason, eff);
+                reason.append(" > 15");
+            }
+            if arch == ARCHETYPE_PANIC_HAZARD || unproven > 0 {
+                if reason.len > 0 { reason.append("; "); }
+                violated = true;
+                reason.append("PANIC_HAZARD (unproven_bce: ");
+                append_i64(reason, unproven);
+                reason.append(")");
+            }
+
+            if violated {
+                gate_violations += 1;
+                gate_report.append("  [REJECT] ");
+                let fn_name = pool_slice(pool, functions[fi].qual_off, functions[fi].qual_len);
+                gate_report.append(fn_name);
+                gate_report.append(" (line ");
+                append_i64(gate_report, functions[fi].start_line);
+                gate_report.append("): ");
+                gate_report.append(reason[..]);
+                gate_report.append("\n");
+            }
+        }
+
+        if gate_violations > 0 {
+            gate_report.append("\nGATE REJECTED: ");
+            append_i64(gate_report, gate_violations);
+            gate_report.append(" functions violated risk gate thresholds.\n");
+            write_stdout(gate_report[..]);
+            return 1;
+        } else {
+            gate_report.append("GATE PASSED: All functions within risk thresholds.\n\n");
+            write_stdout(gate_report[..]);
+        }
     }
 
     return 0;

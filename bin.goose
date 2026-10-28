@@ -14,12 +14,50 @@ fn print_usage() {
     write_stdout("Subcommands:\n");
     write_stdout("  <path|file.goose>      Run // RUN: test directives in file or directory\n");
     write_stdout("  filecheck <file>       Verify standard input against FileCheck directives in <file>\n");
+    write_stdout("  gate <path|file> [max] Verify G-CRAP complexity and bounds safety gate (default ceiling: 25)\n");
     write_stdout("  crap <path|file>       Run integrated G-CRAP complexity and safety risk radar\n");
+    write_stdout("  inspect <file|hex>     Dump byte buffer in hex/ASCII or 128-bit SIMD lanes\n");
     write_stdout("  version, -v            Print version\n");
     write_stdout("  help, -h               Print this help message\n\n");
     write_stdout("Options:\n");
     write_stdout("  --prefix <PREF>        FileCheck match prefix (default: CHECK)\n");
-    write_stdout("  --verbose, -v          Verbose output of commands and matching\n\n");
+    write_stdout("  --verbose, -v          Verbose output of commands and matching\n");
+    write_stdout("  --simd [byte]          SIMD lane match byte for inspect (default: '/')\n");
+    write_stdout("  --offset <N>           Base address offset for inspect hexdump (default: 0)\n\n");
+}
+
+fn handle_inspect(target: const u8[:], is_simd: bool, simd_byte: u8, offset: i64) -> i32 {
+    guard target.len > 0 else {
+        write_stdout("Error: inspect requires a file path, hex string, or quoted payload\n");
+        return 1;
+    }
+
+    var payload: u8[>..] = [];
+    if file_exists(target) {
+        if !read_file(target, payload) {
+            write_stdout("Error: failed to read file: ");
+            write_stdout(target);
+            write_stdout("\n");
+            return 1;
+        }
+    } else {
+        if !lit::parse_packet_payload(target, payload) || payload.len == 0 {
+            write_stdout("Error: failed to parse hex or ASCII payload: ");
+            write_stdout(target);
+            write_stdout("\n");
+            return 1;
+        }
+    }
+
+    var out_diag: u8[>..] = [];
+    if is_simd {
+        lit::format_simd_lanes(payload[..], simd_byte, offset, out_diag);
+    } else {
+        lit::format_hexdump(payload[..], offset, out_diag);
+    }
+
+    write_stdout(out_diag[..]);
+    return 0;
 }
 
 fn handle_filecheck(file_arg: const u8[:], prefix_arg: const u8[:]) -> i32 {
@@ -89,8 +127,49 @@ fn main() {
         return;
     }
 
+    if first == "gate" {
+        let rc = crap::run_crap_cli();
+        sys_exit(rc);
+        return;
+    }
+
     if first == "crap" {
         let rc = crap::run_crap_cli();
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "inspect" {
+        var target: const u8[:] = "";
+        var is_simd = false;
+        var simd_byte: u8 = 47; // '/'
+        var offset: i64 = 0;
+
+        var idx: i64 = 2;
+        while idx < all_args.len {
+            let a = all_args[idx];
+            if a == "--simd" {
+                is_simd = true;
+                if idx + 1 < all_args.len && !crap::slice_starts_with(all_args[idx + 1], "-") {
+                    let sb = all_args[idx + 1];
+                    let num, ok = crap::parse_i64_slice(sb);
+                    if ok {
+                        simd_byte = (num & 0xFF) as! u8;
+                    } else if sb.len == 1 {
+                        simd_byte = sb[0];
+                    }
+                    idx++;
+                }
+            } else if a == "--offset" && idx + 1 < all_args.len {
+                let num, ok = crap::parse_i64_slice(all_args[idx + 1]);
+                if ok { offset = num; }
+                idx++;
+            } else if !crap::slice_starts_with(a, "-") && target.len == 0 {
+                target = a;
+            }
+            idx++;
+        }
+        let rc = handle_inspect(target, is_simd, simd_byte, offset);
         sys_exit(rc);
         return;
     }

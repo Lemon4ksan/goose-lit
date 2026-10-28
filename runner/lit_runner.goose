@@ -182,6 +182,13 @@ fn run_single_lit_test(
         directives.push(def_dir);
     }
 
+    var tmp_scratch: u8[>..] = [];
+    crap::normalize_slashes(file_path, tmp_scratch);
+    tmp_scratch.append(".tmp");
+    if file_exists(tmp_scratch[..]) {
+        delete_file(tmp_scratch[..]);
+    }
+
     let t0 = (crap::monotonic_now().nanos as! i64) / 1000;
 
     for d in directives {
@@ -226,6 +233,10 @@ fn run_single_lit_test(
 
     let t1 = (crap::monotonic_now().nanos as! i64) / 1000;
     res.duration_us = t1 - t0;
+
+    if file_exists(tmp_scratch[..]) {
+        delete_file(tmp_scratch[..]);
+    }
 
     return res.passed;
 }

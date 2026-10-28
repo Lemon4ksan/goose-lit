@@ -36,6 +36,7 @@ if ($LASTEXITCODE -ne 0) {
 $testFiles = @(
     "tests/bench_test.goose",
     "tests/filecheck_test.goose",
+    "tests/gate_test.goose",
     "tests/inspect_test.goose",
     "tests/pipeline_test.goose",
     "tests/wire_test.goose"

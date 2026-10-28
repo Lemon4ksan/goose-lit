@@ -84,6 +84,7 @@ jobs:
           goose check bin.goose
           goose check tests/bench_test.goose
           goose check tests/filecheck_test.goose
+          goose check tests/gate_test.goose
           goose check tests/inspect_test.goose
           goose check tests/pipeline_test.goose
           goose check tests/wire_test.goose
