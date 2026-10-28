@@ -16,22 +16,12 @@ build:
     goose build --cc gcc -O2 -o bin/goose-lit.exe bin.goose
 
 # Typecheck library, CLI, and test suite without compiling binaries
-[unix]
 check:
-    ./scripts/test_all.sh --check-only
+    python tools/test_runner.py --check-only
 
-[windows]
-check:
-    powershell -ExecutionPolicy Bypass -File .\scripts\test_all.ps1 -CheckOnly
-
-# Run the full test suite
-[unix]
-test:
-    ./scripts/test_all.sh
-
-[windows]
-test:
-    powershell -ExecutionPolicy Bypass -File .\scripts\test_all.ps1
+# Run test suites matching a pattern (defaults to all)
+test pattern="*":
+    python tools/test_runner.py --pattern "{{pattern}}"
 
 # Run LIT test runner over tests/
 [unix]
@@ -41,6 +31,14 @@ lit:
 [windows]
 lit:
     .\bin\goose-lit.exe tests/
+
+# Check SPDX Apache-2.0 license headers
+license-check:
+    python tools/licensing.py --check
+
+# Apply missing SPDX Apache-2.0 license headers
+license-fix:
+    python tools/licensing.py --fix
 
 # Format all Goose source files
 fmt:

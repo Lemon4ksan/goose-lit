@@ -20,9 +20,11 @@ import check.filecheck;
 // ---- packet edge & stream mutator -----------------------------------------
 import wire.edge;
 import wire.mutate;
+import wire.inspect;
 
 // ---- in-process testkit & contained sandbox --------------------------------
 import testkit.testkit;
+import testkit.bench;
 
 // ---- lit runner engine ----------------------------------------------------
 import runner.lit_runner;
