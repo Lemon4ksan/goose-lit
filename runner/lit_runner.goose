@@ -74,12 +74,18 @@ fn substitute_lit_command(
     out_cmd: u8[>..]&,
 ) {
     var dir_path: u8[>..] = [];
-    var norm_file: u8[>..] = [];
-    crap::normalize_slashes(file_path, norm_file);
+    var native_file: u8[>..] = [];
+    for b in file_path {
+        if b == '/' {
+            native_file.push('\\');
+        } else {
+            native_file.push(b);
+        }
+    }
 
-    let last_slash = crap::slice_last_index_of_byte(norm_file[..], '/');
+    let last_slash = crap::slice_last_index_of_byte(native_file[..], '\\');
     if last_slash >= 0 {
-        dir_path.append(norm_file[..last_slash]);
+        dir_path.append(native_file[..last_slash]);
     } else {
         dir_path.push('.');
     }
@@ -128,7 +134,7 @@ fn substitute_lit_command(
             } else if i + 1 < n {
                 let spec = cmd_to_sub[i + 1];
                 if spec == 's' {
-                    out_cmd.append(norm_file[..]);
+                    out_cmd.append(native_file[..]);
                     i += 2;
                     continue;
                 } else if spec == 'S' {
@@ -136,7 +142,7 @@ fn substitute_lit_command(
                     i += 2;
                     continue;
                 } else if spec == 't' {
-                    out_cmd.append(norm_file[..]);
+                    out_cmd.append(native_file[..]);
                     out_cmd.append(".tmp");
                     i += 2;
                     continue;

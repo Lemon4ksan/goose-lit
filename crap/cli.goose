@@ -386,7 +386,7 @@ fn run_crap_cli() -> i32 {
                 reason.append(" > ");
                 append_f64_1(reason, gate_ceiling);
             }
-            if eff > 15 {
+            if eff > 15 && arch != ARCHETYPE_VERIFIED_DISPATCH && arch != ARCHETYPE_SAFE_PRIMITIVE {
                 if reason.len > 0 { reason.append("; "); }
                 violated = true;
                 reason.append("EffCC ");
