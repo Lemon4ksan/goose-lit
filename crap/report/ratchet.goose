@@ -11,10 +11,13 @@ import core.bytes;
 import crap.ast.model;
 
 struct BaselineEntry {
+    file_buf: u8[..256] = [],
     name_buf: u8[..128] = [],
+    start_line: i32 = 0,
     g_crap: f64 = 0.0,
     uncovered_bce_keep: i32 = 0,
     cov_branch: f64 = 0.0,
+    consumed: bool = false,
 }
 
 // Saves current scan as a baseline snapshot.
@@ -24,12 +27,20 @@ fn save_baseline_file(
     functions: const FunctionInfo[:],
 ) -> bool {
     var out: u8[>..] = [];
-    out.append("# goose-crap baseline v1\n");
+    out.append("# goose-crap baseline v2\n");
 
     for fi in functions.len {
         let fn_info = functions[fi];
         let name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
+        let file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
 
+        var norm_file: u8[>..] = [];
+        normalize_path(file, norm_file);
+
+        out.append(norm_file);
+        out.push(' ');
+        append_i64(out, fn_info.start_line);
+        out.push(' ');
         out.append(name);
         out.push(' ');
         append_f64_2(out, fn_info.g_crap);
@@ -59,6 +70,7 @@ fn check_ratchet_gate(
         return 0;
     }
 
+    let is_v2 = slice_starts_with(content, "# goose-crap baseline v2");
     var entries: BaselineEntry[>..] = [];
     var line_start: i64 = 0;
     let n = content.len;
@@ -76,33 +88,83 @@ fn check_ratchet_gate(
 
         if raw.len == 0 || raw[0] == '#' { continue; }
 
-        let sp1 = slice_index_of_byte(raw, ' ');
-        if sp1 > 0 && sp1 < raw.len {
-            let name_part = raw[..sp1];
-            let rest1 = trim_ascii(raw[sp1 + 1..]);
-            let sp2 = slice_index_of_byte(rest1, ' ');
-            if sp2 > 0 && sp2 < rest1.len {
-                let gcrap_part = rest1[..sp2];
-                let rest2 = trim_ascii(rest1[sp2 + 1..]);
-                let sp3 = slice_index_of_byte(rest2, ' ');
-                let bce_part = if sp3 > 0 && sp3 <= rest2.len { rest2[..sp3] } else { rest2 };
+        if is_v2 {
+            let sp1 = slice_index_of_byte(raw, ' ');
+            if sp1 > 0 && sp1 < raw.len {
+                let file_part = raw[..sp1];
+                let rest1 = trim_ascii(raw[sp1 + 1..]);
+                let sp2 = slice_index_of_byte(rest1, ' ');
+                if sp2 > 0 && sp2 < rest1.len {
+                    let line_part = rest1[..sp2];
+                    let rest2 = trim_ascii(rest1[sp2 + 1..]);
+                    let sp3 = slice_index_of_byte(rest2, ' ');
+                    if sp3 > 0 && sp3 < rest2.len {
+                        let name_part = rest2[..sp3];
+                        let rest3 = trim_ascii(rest2[sp3 + 1..]);
+                        let sp4 = slice_index_of_byte(rest3, ' ');
+                        if sp4 > 0 && sp4 < rest3.len {
+                            let gcrap_part = rest3[..sp4];
+                            let rest4 = trim_ascii(rest3[sp4 + 1..]);
+                            let sp5 = slice_index_of_byte(rest4, ' ');
+                            let bce_part = if sp5 > 0 && sp5 <= rest4.len { rest4[..sp5] } else { rest4 };
 
-                let gcrap_val, ok_g = parse_f64_slice(gcrap_part);
-                let bce_val, ok_b = parse_i64_slice(bce_part);
-                var cov_val: f64 = 0.0;
-                if sp3 > 0 && sp3 + 1 <= rest2.len {
-                    let rest3 = trim_ascii(rest2[sp3 + 1..]);
-                    let cv, ok_c = parse_f64_slice(rest3);
-                    if ok_c { cov_val = cv; }
+                            let line_val, ok_l = parse_i64_slice(line_part);
+                            let gcrap_val, ok_g = parse_f64_slice(gcrap_part);
+                            let bce_val, ok_b = parse_i64_slice(bce_part);
+                            var cov_val: f64 = 0.0;
+                            if sp5 > 0 && sp5 + 1 <= rest4.len {
+                                let rest5 = trim_ascii(rest4[sp5 + 1..]);
+                                let cv, ok_c = parse_f64_slice(rest5);
+                                if ok_c { cov_val = cv; }
+                            }
+                            var entry = BaselineEntry {
+                                file_buf: [],
+                                name_buf: [],
+                                start_line: if ok_l { line_val as i32 } else { 0 },
+                                g_crap: if ok_g { gcrap_val } else { 0.0 },
+                                uncovered_bce_keep: if ok_b { bce_val as i32 } else { 0 },
+                                cov_branch: cov_val,
+                                consumed: false,
+                            };
+                            entry.file_buf.append(file_part);
+                            entry.name_buf.append(name_part);
+                            entries.push(entry);
+                        }
+                    }
                 }
-                var entry = BaselineEntry {
-                    name_buf: [],
-                    g_crap: if ok_g { gcrap_val } else { 0.0 },
-                    uncovered_bce_keep: if ok_b { bce_val as i32 } else { 0 },
-                    cov_branch: cov_val,
-                };
-                entry.name_buf.append(name_part);
-                entries.push(entry);
+            }
+        } else {
+            let sp1 = slice_index_of_byte(raw, ' ');
+            if sp1 > 0 && sp1 < raw.len {
+                let name_part = raw[..sp1];
+                let rest1 = trim_ascii(raw[sp1 + 1..]);
+                let sp2 = slice_index_of_byte(rest1, ' ');
+                if sp2 > 0 && sp2 < rest1.len {
+                    let gcrap_part = rest1[..sp2];
+                    let rest2 = trim_ascii(rest1[sp2 + 1..]);
+                    let sp3 = slice_index_of_byte(rest2, ' ');
+                    let bce_part = if sp3 > 0 && sp3 <= rest2.len { rest2[..sp3] } else { rest2 };
+
+                    let gcrap_val, ok_g = parse_f64_slice(gcrap_part);
+                    let bce_val, ok_b = parse_i64_slice(bce_part);
+                    var cov_val: f64 = 0.0;
+                    if sp3 > 0 && sp3 + 1 <= rest2.len {
+                        let rest3 = trim_ascii(rest2[sp3 + 1..]);
+                        let cv, ok_c = parse_f64_slice(rest3);
+                        if ok_c { cov_val = cv; }
+                    }
+                    var entry = BaselineEntry {
+                        file_buf: [],
+                        name_buf: [],
+                        start_line: 0,
+                        g_crap: if ok_g { gcrap_val } else { 0.0 },
+                        uncovered_bce_keep: if ok_b { bce_val as i32 } else { 0 },
+                        cov_branch: cov_val,
+                        consumed: false,
+                    };
+                    entry.name_buf.append(name_part);
+                    entries.push(entry);
+                }
             }
         }
     }
@@ -113,32 +175,35 @@ fn check_ratchet_gate(
     for fi in functions.len {
         let fn_info = functions[fi];
         let cur_name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
+        let cur_file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
 
-        var found = false;
-        var prev_bce: i32 = 0;
-        var prev_gcrap: f64 = 0.0;
-
+        var found_idx: i64 = -1;
+        // Priority 1: exact file + start_line + name match
         for ei in entries.len {
-            if entries[ei].name_buf == cur_name {
-                found = true;
-                prev_bce = entries[ei].uncovered_bce_keep;
-                prev_gcrap = entries[ei].g_crap;
+            if entries[ei].consumed { continue; }
+            let file_match = entries[ei].file_buf.len == 0 || paths_match(cur_file, entries[ei].file_buf[..]);
+            if file_match && entries[ei].name_buf == cur_name && entries[ei].start_line == fn_info.start_line {
+                found_idx = ei;
                 break;
             }
         }
-
-        if !found {
-            // New function introduced: check if it introduces uncovered bce:keep
-            if fn_info.uncovered_bce_keep > 0 {
-                violations++;
-                out.append("[VIOLATION] New function `");
-                out.append(cur_name);
-                out.append("` introduces ");
-                append_i64(out, fn_info.uncovered_bce_keep);
-                out.append(" unproven bce:keep bounds checks without branch coverage!\n");
+        // Priority 2: fallback to file + name match
+        if found_idx < 0 {
+            for ei in entries.len {
+                if entries[ei].consumed { continue; }
+                let file_match = entries[ei].file_buf.len == 0 || paths_match(cur_file, entries[ei].file_buf[..]);
+                if file_match && entries[ei].name_buf == cur_name {
+                    found_idx = ei;
+                    break;
+                }
             }
-        } else {
-            // Existing function modified: check for regressions
+        }
+
+        if found_idx >= 0 {
+            entries[found_idx].consumed = true;
+            let prev_bce = entries[found_idx].uncovered_bce_keep;
+            let prev_gcrap = entries[found_idx].g_crap;
+
             if fn_info.uncovered_bce_keep > prev_bce {
                 violations++;
                 out.append("[VIOLATION] Function `");
@@ -157,6 +222,16 @@ fn check_ratchet_gate(
                 out.append(" to ");
                 append_f64_1(out, fn_info.g_crap);
                 out.append("!\n");
+            }
+        } else {
+            // New function introduced: check if it introduces uncovered bce:keep
+            if fn_info.uncovered_bce_keep > 0 {
+                violations++;
+                out.append("[VIOLATION] New function `");
+                out.append(cur_name);
+                out.append("` introduces ");
+                append_i64(out, fn_info.uncovered_bce_keep);
+                out.append(" unproven bce:keep bounds checks without branch coverage!\n");
             }
         }
     }

@@ -270,6 +270,12 @@ fn run_single_lit_test(
     if file_exists(tmp_scratch[..]) {
         delete_file(tmp_scratch[..]);
     }
+    var tmp_exe: u8[>..] = [];
+    tmp_exe.append(tmp_scratch[..]);
+    tmp_exe.append(".exe");
+    if file_exists(tmp_exe[..]) {
+        delete_file(tmp_exe[..]);
+    }
 
     let t0 = (crap::monotonic_now().nanos as! i64) / 1000;
 
@@ -318,6 +324,9 @@ fn run_single_lit_test(
 
     if file_exists(tmp_scratch[..]) {
         delete_file(tmp_scratch[..]);
+    }
+    if file_exists(tmp_exe[..]) {
+        delete_file(tmp_exe[..]);
     }
 
     let all_passed = (res.failed_runs == 0);
