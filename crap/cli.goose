@@ -320,7 +320,7 @@ fn run_crap_cli() -> i32 {
 
     // 8. Save baseline snapshot if requested
     if save_baseline_file_path.len > 0 {
-        if save_baseline_file(save_baseline_file_path, pool, functions) {
+        if save_baseline_file(save_baseline_file_path, target_path, pool, functions) {
             write_stdout("Saved baseline snapshot to: ");
             write_stdout(save_baseline_file_path);
             write_stdout("\n");

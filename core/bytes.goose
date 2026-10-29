@@ -275,11 +275,15 @@ fn append_padded_left<B>(out: B&, s: const u8[:], width: i64) {
 }
 
 // Normalizes file paths so mixed Windows/POSIX separators and casing match identically.
+// Strips redundant leading `./` or `.\\` segments.
 fn normalize_path(path: const u8[:], out: u8[>..]&) {
     var t = trim_ascii(path);
     // Strip UTF-8 BOM (0xEF, 0xBB, 0xBF) if present
     if t.len >= 3 && t[0] == 0xEF && t[1] == 0xBB && t[2] == 0xBF {
         t = t[3..];
+    }
+    while t.len >= 2 && t[0] == '.' && (t[1] == '/' || t[1] == '\\') {
+        t = t[2..];
     }
     for i in t.len {
         let c = t[i];
@@ -307,6 +311,31 @@ fn normalize_slashes(path: const u8[:], out: u8[>..]&) {
     }
 }
 
+// Converts a path into a canonical relative path by stripping root prefixes or leading relative markers.
+fn to_relative_path(path: const u8[:], root: const u8[:], out: u8[>..]&) {
+    var npath: u8[>..] = [];
+    normalize_path(path, npath);
+    var p: const u8[:] = npath[..];
+
+    var nroot: u8[>..] = [];
+    normalize_path(root, nroot);
+    var r: const u8[:] = nroot[..];
+    while r.len > 0 && r[r.len - 1] == '/' {
+        r = r[..r.len - 1];
+    }
+
+    if r.len > 0 && r != "." && slice_starts_with(p, r) {
+        p = p[r.len..];
+        while p.len > 0 && p[0] == '/' {
+            p = p[1..];
+        }
+    }
+    while p.len >= 2 && p[0] == '.' && p[1] == '/' {
+        p = p[2..];
+    }
+    out.append(p);
+}
+
 // Checks if two paths refer to the same file.
 fn paths_match(a: const u8[:], b: const u8[:]) -> bool {
     var na: u8[>..] = [];
@@ -316,16 +345,47 @@ fn paths_match(a: const u8[:], b: const u8[:]) -> bool {
     let sa: const u8[:] = na[..];
     let sb: const u8[:] = nb[..];
     if sa == sb { return true; }
-    if sa.len > sb.len && sb.len > 0 && slice_ends_with(sa, sb) {
+    if sa.len == 0 || sb.len == 0 { return false; }
+
+    // Case 1: one path is a relative suffix of the other (e.g. "auth/digest.goose" vs "/path/to/auth/digest.goose")
+    if sa.len > sb.len && slice_ends_with(sa, sb) {
         let idx = sa.len - sb.len;
         guard idx > 0 && idx <= sa.len else { return false; }
         if sa[idx - 1] == '/' { return true; }
     }
-    if sb.len > sa.len && sa.len > 0 && slice_ends_with(sb, sa) {
+    if sb.len > sa.len && slice_ends_with(sb, sa) {
         let idx = sb.len - sa.len;
         guard idx > 0 && idx <= sb.len else { return false; }
         if sb[idx - 1] == '/' { return true; }
     }
+
+    // Case 2: cross-environment absolute paths sharing common repo suffix
+    var common_len: i64 = 0;
+    while common_len < sa.len && common_len < sb.len {
+        let ca = sa[sa.len - 1 - common_len];
+        let cb = sb[sb.len - 1 - common_len];
+        if ca != cb { break; }
+        common_len++;
+    }
+    guard common_len > 0 else { return false; }
+
+    var valid_len: i64 = common_len;
+    while valid_len > 0 {
+        let a_delim = (sa.len == valid_len) || (sa[sa.len - 1 - valid_len] == '/');
+        let b_delim = (sb.len == valid_len) || (sb[sb.len - 1 - valid_len] == '/');
+        if a_delim && b_delim {
+            let matched = sa[sa.len - valid_len..];
+            if slice_index_of_byte(matched, '/') >= 0 {
+                return true;
+            }
+            if sa.len == valid_len || sb.len == valid_len {
+                return true;
+            }
+            break;
+        }
+        valid_len--;
+    }
+
     return false;
 }
 

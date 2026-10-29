@@ -35,15 +35,25 @@ fn exec_capture(cmd: const u8[:], out: u8[>..]&) -> i32 {
 fn collect_goose_files(root_path: const u8[:], include_tests: bool, out_paths_blob: u8[>..]&) {
     if file_exists(root_path) {
         if slice_ends_with(root_path, ".goose") {
-            out_paths_blob.append(root_path);
+            var norm: u8[>..] = [];
+            normalize_path(root_path, norm);
+            out_paths_blob.append(norm);
             out_paths_blob.push('\n');
         }
         return;
     }
     guard is_dir(root_path) else { return; }
 
+    var clean_root: u8[>..] = [];
+    normalize_path(root_path, clean_root);
+    let is_root_dot = clean_root.len == 0 || clean_root == ".";
+
     var dir_queue: u8[>..] = [];
-    dir_queue.append(root_path);
+    if is_root_dot {
+        dir_queue.append(".");
+    } else {
+        dir_queue.append(clean_root);
+    }
     dir_queue.push('\n');
 
     var queue_cursor: i64 = 0;
@@ -74,9 +84,12 @@ fn collect_goose_files(root_path: const u8[:], include_tests: bool, out_paths_bl
                             continue;
                         }
                         var child: u8[>..] = [];
-                        child.append(cur_dir);
-                        if !slice_ends_with(cur_dir, "/") && !slice_ends_with(cur_dir, "\\") {
-                            child.push('/');
+                        let is_dot = cur_dir == "." || cur_dir == "./" || cur_dir == ".\\";
+                        if !is_dot && cur_dir.len > 0 {
+                            child.append(cur_dir);
+                            if !slice_ends_with(cur_dir, "/") && !slice_ends_with(cur_dir, "\\") {
+                                child.push('/');
+                            }
                         }
                         child.append(name);
 

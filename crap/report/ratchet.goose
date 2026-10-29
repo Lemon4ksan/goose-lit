@@ -23,6 +23,7 @@ struct BaselineEntry {
 // Saves current scan as a baseline snapshot.
 fn save_baseline_file(
     baseline_path: const u8[:],
+    root_path: const u8[:],
     pool: const u8[:],
     functions: const FunctionInfo[:],
 ) -> bool {
@@ -35,7 +36,7 @@ fn save_baseline_file(
         let file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
 
         var norm_file: u8[>..] = [];
-        normalize_path(file, norm_file);
+        to_relative_path(file, root_path, norm_file);
 
         out.append(norm_file);
         out.push(' ');
