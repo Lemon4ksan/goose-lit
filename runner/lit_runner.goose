@@ -15,13 +15,36 @@ struct RunDirective {
     command: u8[..512] = [],
 }
 
+enum TestStatus {
+    Pass,
+    Fail,
+    XFail,
+    XPass,
+    Unsupported,
+}
+
 struct TestResult {
     file_path: u8[..512] = [],
+    status: TestStatus = TestStatus.Pass,
     passed: bool = true,
     total_runs: i64 = 0,
     failed_runs: i64 = 0,
     duration_us: i64 = 0,
     diag: u8[>..] = [],
+}
+
+fn host_has_feature(feat: const u8[:]) -> bool {
+    let f = crap::trim_ascii(feat);
+    if f == "windows" || f == "win32" || f == "win64" {
+        return true;
+    }
+    if f == "x86_64" || f == "amd64" || f == "x64" {
+        return true;
+    }
+    if f == "gcc" || f == "goose" {
+        return true;
+    }
+    return false;
 }
 
 // Scans a source file for `// RUN: <command>` directives.
@@ -188,6 +211,43 @@ fn run_single_lit_test(
         return false;
     }
 
+    var is_xfail = false;
+    var is_unsupported = false;
+
+    var cur: i64 = 0;
+    let sn = src.len;
+    while cur < sn {
+        var next_nl = cur;
+        while next_nl < sn && src[next_nl] != '\n' { next_nl += 1; }
+        let line = crap::trim_ascii(src[cur..next_nl]);
+        cur = next_nl + 1;
+        if line.len >= 2 && line[0] == '/' && line[1] == '/' {
+            let body = crap::trim_ascii(line[2..]);
+            if crap::slice_starts_with(body, "XFAIL:") {
+                let targets = crap::trim_ascii(body[6..]);
+                if targets == "*" || host_has_feature(targets) {
+                    is_xfail = true;
+                }
+            } else if crap::slice_starts_with(body, "REQUIRES:") {
+                let reqs = crap::trim_ascii(body[9..]);
+                if reqs.len > 0 && !host_has_feature(reqs) {
+                    is_unsupported = true;
+                }
+            } else if crap::slice_starts_with(body, "UNSUPPORTED:") {
+                let unsupp = crap::trim_ascii(body[12..]);
+                if unsupp.len > 0 && host_has_feature(unsupp) {
+                    is_unsupported = true;
+                }
+            }
+        }
+    }
+
+    if is_unsupported {
+        res.status = TestStatus.Unsupported;
+        res.passed = true;
+        return true;
+    }
+
     var directives: RunDirective[>..] = [];
     if !parse_run_directives(src[..], directives) {
         // Fallback default: if no // RUN: directive, perform goose check
@@ -258,6 +318,26 @@ fn run_single_lit_test(
 
     if file_exists(tmp_scratch[..]) {
         delete_file(tmp_scratch[..]);
+    }
+
+    let all_passed = (res.failed_runs == 0);
+    if all_passed {
+        if is_xfail {
+            res.status = TestStatus.XPass;
+            res.passed = false;
+            res.diag.append("UNEXPECTED PASS: test marked XFAIL passed unexpectedly\n");
+        } else {
+            res.status = TestStatus.Pass;
+            res.passed = true;
+        }
+    } else {
+        if is_xfail {
+            res.status = TestStatus.XFail;
+            res.passed = true;
+        } else {
+            res.status = TestStatus.Fail;
+            res.passed = false;
+        }
     }
 
     return res.passed;

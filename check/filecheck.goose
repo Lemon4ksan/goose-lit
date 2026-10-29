@@ -112,12 +112,15 @@ enum SegKind {
     Wildcard,
     VarDef,
     VarUse,
+    NumDef,
+    NumExpr,
 }
 
 struct PatternSeg {
     kind: SegKind = SegKind.Lit,
     text: u8[..128] = [],
     spec: u8[..64] = [],
+    num_offset: i64 = 0,
 }
 
 fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
@@ -182,18 +185,64 @@ fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
             let close_pos = crap::slice_index_of(after_open, "]]");
             guard close_pos >= 0 else { return false; }
             let body = after_open[..close_pos];
-            let colon_pos = crap::slice_index_of_byte(body, ':');
-            if colon_pos >= 0 {
-                let name = body[..colon_pos];
-                let spec = body[colon_pos + 1..];
-                var seg = PatternSeg { kind: SegKind.VarDef, .. };
-                for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                for b in spec { if seg.spec.len < seg.spec.cap { seg.spec.push(b); } }
-                if out_segs.len < out_segs.cap { out_segs.push(seg); }
+            if body.len > 0 && body[0] == '#' {
+                // Numeric FileCheck expression: [[#...]]
+                let num_body = crap::trim_ascii(body[1..]);
+                let colon_pos = crap::slice_index_of_byte(num_body, ':');
+                if colon_pos >= 0 {
+                    // Definition: [[#VAR:]] or [[#VAR:[0-9]+]]
+                    let name = crap::trim_ascii(num_body[..colon_pos]);
+                    var spec = crap::trim_ascii(num_body[colon_pos + 1..]);
+                    if spec.len == 0 { spec = "[0-9]+"; }
+                    var seg = PatternSeg { kind: SegKind.NumDef, .. };
+                    for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
+                    for b in spec { if seg.spec.len < seg.spec.cap { seg.spec.push(b); } }
+                    if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                } else {
+                    // Expression or numeric reference
+                    let plus_pos = crap::slice_index_of_byte(num_body, '+');
+                    let minus_pos = crap::slice_index_of_byte(num_body, '-');
+                    if plus_pos > 0 {
+                        let name = crap::trim_ascii(num_body[..plus_pos]);
+                        let off_str = crap::trim_ascii(num_body[plus_pos + 1..]);
+                        let off_val, _ = crap::parse_i64_slice(off_str);
+                        var seg = PatternSeg { kind: SegKind.NumExpr, num_offset: off_val, .. };
+                        for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
+                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                    } else if minus_pos > 0 {
+                        let name = crap::trim_ascii(num_body[..minus_pos]);
+                        let off_str = crap::trim_ascii(num_body[minus_pos + 1..]);
+                        let off_val, _ = crap::parse_i64_slice(off_str);
+                        var seg = PatternSeg { kind: SegKind.NumExpr, num_offset: -off_val, .. };
+                        for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
+                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                    } else if num_body.len == 0 {
+                        // [[#]] -> unnamed numeric wildcard
+                        var seg = PatternSeg { kind: SegKind.Wildcard, .. };
+                        let spec = "[0-9]+";
+                        for b in spec { if seg.spec.len < seg.spec.cap { seg.spec.push(b); } }
+                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                    } else {
+                        // [[#VAR]] -> numeric reference with 0 offset
+                        var seg = PatternSeg { kind: SegKind.NumExpr, num_offset: 0, .. };
+                        for b in num_body { if seg.text.len < seg.text.cap { seg.text.push(b); } }
+                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                    }
+                }
             } else {
-                var seg = PatternSeg { kind: SegKind.VarUse, .. };
-                for b in body { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                let colon_pos = crap::slice_index_of_byte(body, ':');
+                if colon_pos >= 0 {
+                    let name = body[..colon_pos];
+                    let spec = body[colon_pos + 1..];
+                    var seg = PatternSeg { kind: SegKind.VarDef, .. };
+                    for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
+                    for b in spec { if seg.spec.len < seg.spec.cap { seg.spec.push(b); } }
+                    if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                } else {
+                    var seg = PatternSeg { kind: SegKind.VarUse, .. };
+                    for b in body { if seg.text.len < seg.text.cap { seg.text.push(b); } }
+                    if out_segs.len < out_segs.cap { out_segs.push(seg); }
+                }
             }
             cur += 2 + close_pos + 2;
         }
@@ -201,9 +250,15 @@ fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
     return true;
 }
 
-fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckContext&) -> bool {
+fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckContext&, out_end_pos: i64& = 0) -> bool {
+    out_end_pos = 0;
     if !crap::slice_contains(pat, "{{") && !crap::slice_contains(pat, "[[") {
-        return crap::slice_contains(line, pat);
+        let idx = crap::slice_index_of(line, pat);
+        if idx >= 0 {
+            out_end_pos = idx + pat.len;
+            return true;
+        }
+        return false;
     }
 
     var segs: PatternSeg[..32] = [];
@@ -251,6 +306,41 @@ fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckCont
                     match_ok = false;
                     break;
                 }
+            } else if seg.kind == SegKind.NumExpr {
+                let name = seg.text[..];
+                var val_buf: u8[..64] = [];
+                var found_v = false;
+                for i in local_vars.len {
+                    if local_vars[i].name[..] == name {
+                        for b in local_vars[i].val { if val_buf.len < val_buf.cap { val_buf.push(b); } }
+                        found_v = true;
+                        break;
+                    }
+                }
+                if !found_v {
+                    let v, ok = get_var(ctx, name);
+                    if ok {
+                        for b in v { if val_buf.len < val_buf.cap { val_buf.push(b); } }
+                        found_v = true;
+                    }
+                }
+                if !found_v {
+                    match_ok = false;
+                    break;
+                }
+                let base_num, ok_b = crap::parse_i64_slice(val_buf[..]);
+                if !ok_b {
+                    match_ok = false;
+                    break;
+                }
+                let target_num = base_num + seg.num_offset;
+                var num_buf: u8[..32] = [];
+                format(num_buf, target_num);
+                if !crap::slice_starts_with(line[pos..], num_buf[..]) {
+                    match_ok = false;
+                    break;
+                }
+                pos += num_buf.len;
             } else {
                 let is_card_any = (seg.spec[..] == ".*" || seg.spec[..] == ".+" || seg.spec[..] == "*");
                 let is_at_least_one = (seg.spec[..] != ".*" && seg.spec[..] != "*");
@@ -297,7 +387,7 @@ fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckCont
                     }
                 }
 
-                if seg.kind == SegKind.VarDef {
+                if seg.kind == SegKind.VarDef || seg.kind == SegKind.NumDef {
                     let captured = line[capture_start..pos];
                     var lv = FileCheckVar { .. };
                     for b in seg.text[..] { if lv.name.len < lv.name.cap { lv.name.push(b); } }
@@ -312,6 +402,7 @@ fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckCont
             for lv in local_vars {
                 set_var(ctx, lv.name[..], lv.val[..]);
             }
+            out_end_pos = pos;
             return true;
         }
 
@@ -446,6 +537,7 @@ fn run_filecheck(
 
     var in_idx: i64 = 0;
     var last_matched_line: i64 = -1;
+    var last_matched_col: i64 = 0;
     var ctx = FileCheckContext { .. };
 
     var r_idx: i64 = 0;
@@ -453,12 +545,34 @@ fn run_filecheck(
         let rule = rules[r_idx];
         let pat: const u8[:] = rule.pattern[..];
 
+        // Calculate current section boundary (bounded by next CHECK-LABEL)
+        var section_end_line = in_lines_start.len;
+        var next_lbl = r_idx + 1;
+        while next_lbl < rules.len {
+            if rules[next_lbl].kind == CheckKind.Label {
+                let lbl_pat: const u8[:] = rules[next_lbl].pattern[..];
+                var s_i = in_idx;
+                while s_i < in_lines_start.len {
+                    let l_str = output_stream[in_lines_start[s_i]..in_lines_end[s_i]];
+                    var dummy_col: i64 = 0;
+                    if match_pattern_in_line(l_str, lbl_pat, ctx, dummy_col) {
+                        section_end_line = s_i;
+                        break;
+                    }
+                    s_i += 1;
+                }
+                break;
+            }
+            next_lbl += 1;
+        }
+
         if rule.kind == CheckKind.Label {
             var found_idx: i64 = -1;
             var i = in_idx;
+            var end_c: i64 = 0;
             while i < in_lines_start.len {
                 let l_str = output_stream[in_lines_start[i]..in_lines_end[i]];
-                if match_pattern_in_line(l_str, pat, ctx) {
+                if match_pattern_in_line(l_str, pat, ctx, end_c) {
                     found_idx = i;
                     break;
                 }
@@ -477,13 +591,15 @@ fn run_filecheck(
             }
 
             last_matched_line = found_idx;
+            last_matched_col = end_c;
             in_idx = found_idx + 1;
         } else if rule.kind == CheckKind.Check {
             var found_idx: i64 = -1;
             var i = in_idx;
-            while i < in_lines_start.len {
+            var end_c: i64 = 0;
+            while i < section_end_line {
                 let l_str = output_stream[in_lines_start[i]..in_lines_end[i]];
-                if match_pattern_in_line(l_str, pat, ctx) {
+                if match_pattern_in_line(l_str, pat, ctx, end_c) {
                     found_idx = i;
                     break;
                 }
@@ -497,27 +613,29 @@ fn run_filecheck(
                 format(out_diag, rule.line_no);
                 out_diag.append(": pattern '");
                 out_diag.append(pat);
-                out_diag.append("' not found\n");
+                out_diag.append("' not found within current section\n");
                 return false;
             }
 
             last_matched_line = found_idx;
+            last_matched_col = end_c;
             in_idx = found_idx + 1;
         } else if rule.kind == CheckKind.Next {
             let next_target = last_matched_line + 1;
-            if next_target >= in_lines_start.len {
+            if next_target >= section_end_line || next_target >= in_lines_start.len {
                 out_diag.append("FileCheck [");
                 out_diag.append(pref);
                 out_diag.append("-NEXT] FAILED on line ");
                 format(out_diag, rule.line_no);
-                out_diag.append(": reached end of input, expected '");
+                out_diag.append(": reached end of section/input, expected '");
                 out_diag.append(pat);
                 out_diag.append("'\n");
                 return false;
             }
 
             let l_str = output_stream[in_lines_start[next_target]..in_lines_end[next_target]];
-            if !match_pattern_in_line(l_str, pat, ctx) {
+            var end_c: i64 = 0;
+            if !match_pattern_in_line(l_str, pat, ctx, end_c) {
                 out_diag.append("FileCheck [");
                 out_diag.append(pref);
                 out_diag.append("-NEXT] FAILED on line ");
@@ -531,6 +649,7 @@ fn run_filecheck(
             }
 
             last_matched_line = next_target;
+            last_matched_col = end_c;
             in_idx = next_target + 1;
         } else if rule.kind == CheckKind.Same {
             if last_matched_line < 0 || last_matched_line >= in_lines_start.len {
@@ -542,27 +661,30 @@ fn run_filecheck(
                 return false;
             }
 
-            let l_str = output_stream[in_lines_start[last_matched_line]..in_lines_end[last_matched_line]];
-            if !match_pattern_in_line(l_str, pat, ctx) {
+            let full_line = output_stream[in_lines_start[last_matched_line]..in_lines_end[last_matched_line]];
+            let search_slice = if last_matched_col < full_line.len { full_line[last_matched_col..] } else { "" };
+            var sub_end_col: i64 = 0;
+            if !match_pattern_in_line(search_slice, pat, ctx, sub_end_col) {
                 out_diag.append("FileCheck [");
                 out_diag.append(pref);
                 out_diag.append("-SAME] FAILED on line ");
                 format(out_diag, rule.line_no);
                 out_diag.append(": same line does not contain '");
                 out_diag.append(pat);
-                out_diag.append("'\n  Actual: '");
-                out_diag.append(l_str);
+                out_diag.append("' after previous match\n  Actual remainder: '");
+                out_diag.append(search_slice);
                 out_diag.append("'\n");
                 return false;
             }
+            last_matched_col += sub_end_col;
         } else if rule.kind == CheckKind.Empty {
             let next_target = last_matched_line + 1;
-            if next_target >= in_lines_start.len {
+            if next_target >= section_end_line || next_target >= in_lines_start.len {
                 out_diag.append("FileCheck [");
                 out_diag.append(pref);
                 out_diag.append("-EMPTY] FAILED on line ");
                 format(out_diag, rule.line_no);
-                out_diag.append(": reached end of input, expected empty line\n");
+                out_diag.append(": reached end of section/input, expected empty line\n");
                 return false;
             }
 
@@ -579,17 +701,19 @@ fn run_filecheck(
             }
 
             last_matched_line = next_target;
+            last_matched_col = 0;
             in_idx = next_target + 1;
         } else if rule.kind == CheckKind.Not {
-            var bound_line = in_lines_start.len;
+            var bound_line = section_end_line;
             var next_r = r_idx + 1;
             while next_r < rules.len {
                 if rules[next_r].kind == CheckKind.Check || rules[next_r].kind == CheckKind.Label {
                     let next_pat: const u8[:] = rules[next_r].pattern[..];
                     var s_i = in_idx;
-                    while s_i < in_lines_start.len {
+                    while s_i < bound_line {
                         let l_str = output_stream[in_lines_start[s_i]..in_lines_end[s_i]];
-                        if match_pattern_in_line(l_str, next_pat, ctx) {
+                        var dummy_col: i64 = 0;
+                        if match_pattern_in_line(l_str, next_pat, ctx, dummy_col) {
                             bound_line = s_i;
                             break;
                         }
@@ -603,7 +727,8 @@ fn run_filecheck(
             var chk_i = in_idx;
             while chk_i < bound_line {
                 let l_str = output_stream[in_lines_start[chk_i]..in_lines_end[chk_i]];
-                if match_pattern_in_line(l_str, pat, ctx) {
+                var dummy_col: i64 = 0;
+                if match_pattern_in_line(l_str, pat, ctx, dummy_col) {
                     out_diag.append("FileCheck [");
                     out_diag.append(pref);
                     out_diag.append("-NOT] FAILED on line ");
@@ -625,15 +750,16 @@ fn run_filecheck(
                 dag_end += 1;
             }
 
-            var bound_line = in_lines_start.len;
+            var bound_line = section_end_line;
             var next_r = dag_end;
             while next_r < rules.len {
                 if rules[next_r].kind == CheckKind.Check || rules[next_r].kind == CheckKind.Label {
                     let next_pat: const u8[:] = rules[next_r].pattern[..];
                     var s_i = in_idx;
-                    while s_i < in_lines_start.len {
+                    while s_i < bound_line {
                         let l_str = output_stream[in_lines_start[s_i]..in_lines_end[s_i]];
-                        if match_pattern_in_line(l_str, next_pat, ctx) {
+                        var dummy_col: i64 = 0;
+                        if match_pattern_in_line(l_str, next_pat, ctx, dummy_col) {
                             bound_line = s_i;
                             break;
                         }
@@ -661,7 +787,8 @@ fn run_filecheck(
                     }
                     if !already_claimed {
                         let l_str = output_stream[in_lines_start[l_i]..in_lines_end[l_i]];
-                        if match_pattern_in_line(l_str, d_pat, ctx) {
+                        var dummy_col: i64 = 0;
+                        if match_pattern_in_line(l_str, d_pat, ctx, dummy_col) {
                             found_dag_line = l_i;
                             claimed.push(l_i);
                             if l_i > max_matched_line {
@@ -688,6 +815,7 @@ fn run_filecheck(
             }
 
             last_matched_line = max_matched_line;
+            last_matched_col = 0;
             in_idx = max_matched_line + 1;
             r_idx = dag_end;
             continue;
@@ -695,11 +823,13 @@ fn run_filecheck(
             let count_needed = rule.count;
             var found_count: i64 = 0;
             var cur_i = in_idx;
-            while cur_i < in_lines_start.len && found_count < count_needed {
+            while cur_i < section_end_line && found_count < count_needed {
                 let l_str = output_stream[in_lines_start[cur_i]..in_lines_end[cur_i]];
-                if match_pattern_in_line(l_str, pat, ctx) {
+                var end_c: i64 = 0;
+                if match_pattern_in_line(l_str, pat, ctx, end_c) {
                     found_count += 1;
                     last_matched_line = cur_i;
+                    last_matched_col = end_c;
                 }
                 cur_i += 1;
             }

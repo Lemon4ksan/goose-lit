@@ -217,7 +217,7 @@ fn main() {
     if file_exists(target_path) && !is_dir(target_path) {
         var res = lit::TestResult { .. };
         let ok = lit::run_single_lit_test(target_path, verbose, res);
-        if ok {
+        if res.status == lit::TestStatus.Pass {
             write_stdout("PASS: ");
             write_stdout(target_path);
             write_stdout(" (");
@@ -226,6 +226,26 @@ fn main() {
             write_stdout(num_b[..]);
             write_stdout(" ms)\n");
             sys_exit(0);
+        } else if res.status == lit::TestStatus.XFail {
+            write_stdout("XFAIL: ");
+            write_stdout(target_path);
+            write_stdout(" (");
+            var num_b: u8[..32] = [];
+            format(num_b, res.duration_us / 1000);
+            write_stdout(num_b[..]);
+            write_stdout(" ms)\n");
+            sys_exit(0);
+        } else if res.status == lit::TestStatus.Unsupported {
+            write_stdout("UNSUPPORTED: ");
+            write_stdout(target_path);
+            write_stdout("\n");
+            sys_exit(0);
+        } else if res.status == lit::TestStatus.XPass {
+            write_stdout("XPASS: ");
+            write_stdout(target_path);
+            write_stdout("\n");
+            write_stdout(res.diag[..]);
+            sys_exit(1);
         } else {
             write_stdout("FAIL: ");
             write_stdout(target_path);
@@ -249,6 +269,9 @@ fn main() {
 
     var passed_count: i64 = 0;
     var failed_count: i64 = 0;
+    var xfail_count: i64 = 0;
+    var xpass_count: i64 = 0;
+    var unsupported_count: i64 = 0;
     var total_time_us: i64 = 0;
 
     var cur: i64 = 0;
@@ -268,7 +291,7 @@ fn main() {
         let ok = lit::run_single_lit_test(t_file, verbose, res);
         total_time_us += res.duration_us;
 
-        if ok {
+        if res.status == lit::TestStatus.Pass {
             passed_count += 1;
             write_stdout("  [PASS] ");
             write_stdout(t_file);
@@ -277,6 +300,27 @@ fn main() {
             format(ms_b, res.duration_us / 1000);
             write_stdout(ms_b[..]);
             write_stdout(" ms)\n");
+        } else if res.status == lit::TestStatus.XFail {
+            xfail_count += 1;
+            write_stdout("  [XFAIL] ");
+            write_stdout(t_file);
+            write_stdout(" (");
+            var ms_b: u8[..32] = [];
+            format(ms_b, res.duration_us / 1000);
+            write_stdout(ms_b[..]);
+            write_stdout(" ms)\n");
+        } else if res.status == lit::TestStatus.Unsupported {
+            unsupported_count += 1;
+            write_stdout("  [UNSUPPORTED] ");
+            write_stdout(t_file);
+            write_stdout("\n");
+        } else if res.status == lit::TestStatus.XPass {
+            xpass_count += 1;
+            failed_count += 1;
+            write_stdout("  [XPASS] ");
+            write_stdout(t_file);
+            write_stdout("\n");
+            write_stdout(res.diag[..]);
         } else {
             failed_count += 1;
             write_stdout("  [FAIL] ");
@@ -295,9 +339,25 @@ fn main() {
     var f_b: u8[..32] = [];
     format(f_b, failed_count);
     write_stdout(f_b[..]);
-    write_stdout(" failed in ");
+    write_stdout(" failed, ");
+    var x_b: u8[..32] = [];
+    format(x_b, xfail_count);
+    write_stdout(x_b[..]);
+    write_stdout(" xfailed, ");
+    var u_b: u8[..32] = [];
+    format(u_b, unsupported_count);
+    write_stdout(u_b[..]);
+    write_stdout(" unsupported in ");
     var tot_ms_b: u8[..32] = [];
     format(tot_ms_b, total_time_us / 1000);
+    write_stdout(tot_ms_b[..]);
+    write_stdout(" ms\n");
+
+    if failed_count == 0 && xpass_count == 0 {
+        sys_exit(0);
+    } else {
+        sys_exit(1);
+    }
     write_stdout(tot_ms_b[..]);
     write_stdout(" ms\n");
 

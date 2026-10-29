@@ -96,5 +96,75 @@ fn main() {
         return;
     }
 
+    // 5. CHECK-LABEL, CHECK-SAME, and CHECK-EMPTY test
+    let label_output = """
+        SECTION Alpha
+        Key: Status
+        Result: 200 OK detail=fine
+
+        SECTION Beta
+        Key: Status
+        Result: 404 NOT_FOUND
+        """;
+
+    let label_test = """
+        // CHECK-LABEL: SECTION Alpha
+        // CHECK: Key: Status
+        // CHECK: Result: 200
+        // CHECK-SAME: OK
+        // CHECK-SAME: detail=fine
+        // CHECK-EMPTY:
+        // CHECK-LABEL: SECTION Beta
+        // CHECK: Key: Status
+        // CHECK: Result: 404
+        // CHECK-SAME: NOT_FOUND
+        """;
+
+    var diag5: u8[>..] = [];
+    let ok5 = lit::run_filecheck(label_output, label_test, "CHECK", diag5);
+    if !ok5 {
+        print("FAIL label_same_empty: ", diag5);
+        return;
+    }
+
+    // 6. Numeric FileCheck [[#VAR:]], [[#VAR + N]], [[#VAR - N]], [[#]]
+    let num_output = """
+        PACKET_TX pn=100 len=48
+        PACKET_ACK pn=100
+        PACKET_TX pn=101 len=32
+        PACKET_TX pn=110 len=64
+        PACKET_RETX pn=95 len=16
+        """;
+
+    let num_test = """
+        // CHECK: PACKET_TX pn=[[#PN:]] len=[[#]]
+        // CHECK: PACKET_ACK pn=[[#PN]]
+        // CHECK-NEXT: PACKET_TX pn=[[#PN + 1]] len=[[#]]
+        // CHECK: PACKET_TX pn=[[#PN + 10]] len=[[#]]
+        // CHECK: PACKET_RETX pn=[[#PN - 5]] len=[[#]]
+        """;
+
+    var diag6: u8[>..] = [];
+    let ok6 = lit::run_filecheck(num_output, num_test, "CHECK", diag6);
+    if !ok6 {
+        print("FAIL numeric_expr: ", diag6);
+        return;
+    }
+
+    // 7. CHECK-LABEL isolation negative test
+    // Target is in SECTION Beta, but sought in SECTION Alpha -> MUST fail!
+    let iso_test = """
+        // CHECK-LABEL: SECTION Alpha
+        // CHECK: Result: 404
+        // CHECK-LABEL: SECTION Beta
+        """;
+
+    var diag7: u8[>..] = [];
+    let ok7 = lit::run_filecheck(label_output, iso_test, "CHECK", diag7);
+    if ok7 {
+        print("FAIL label_isolation: pattern from Beta matched in Alpha!");
+        return;
+    }
+
     print("FileCheck self-test passed!");
 }
