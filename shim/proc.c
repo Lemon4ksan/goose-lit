@@ -132,7 +132,7 @@ GCRAP_WEAK int32_t crap_exec_to_file(crap_bytes_ro cmd, crap_bytes_ro out_path) 
 
 #ifdef _WIN32
     char full_cmd[8256];
-    snprintf(full_cmd, sizeof(full_cmd), "\"%s 2>&1\"", c_cmd);
+    snprintf(full_cmd, sizeof(full_cmd), "%s 2>&1", c_cmd);
     wchar_t w_cmd[8256];
     wchar_t w_out[4096];
     if (MultiByteToWideChar(CP_UTF8, 0, full_cmd, -1, w_cmd, 8256) <= 0) return -1;
