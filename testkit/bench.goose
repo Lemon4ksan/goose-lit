@@ -25,11 +25,11 @@ fn verify_latency_budget<F: fn()>(
         F();
     }
 
-    let t0 = crap::monotonic_now().nanos;
+    let t0 = monotonic_now().nanos;
     for _ in iterations {
         F();
     }
-    let t1 = crap::monotonic_now().nanos;
+    let t1 = monotonic_now().nanos;
 
     let total_ns = (t1 - t0) as! i64;
     let avg_ns = if total_ns > 0 { total_ns / iterations } else { 0 };

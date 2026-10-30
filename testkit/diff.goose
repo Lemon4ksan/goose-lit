@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Lemon4ksan
 
 // Structural diff and hexadecimal byte difference formatting for assertion diagnostics.
-namespace crap;
+namespace lit;
 
 import std;
 

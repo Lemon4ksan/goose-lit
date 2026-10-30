@@ -8,8 +8,6 @@ import std;
 
 import core.bytes;
 import core.proc;
-import core.time;
-import core.test;
 import core.config;
 import crap.lexer.scanner;
 import crap.ast.model;

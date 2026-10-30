@@ -305,7 +305,7 @@ fn run_single_lit_test(
         delete_file(tmp_exe[..]);
     }
 
-    let t0 = (crap::monotonic_now().nanos as! i64) / 1000;
+    let t0 = (monotonic_now().nanos as! i64) / 1000;
 
     for d in directives {
         res.total_runs += 1;
@@ -347,7 +347,7 @@ fn run_single_lit_test(
         }
     }
 
-    let t1 = (crap::monotonic_now().nanos as! i64) / 1000;
+    let t1 = (monotonic_now().nanos as! i64) / 1000;
     res.duration_us = t1 - t0;
 
     if file_exists(tmp_scratch[..]) {

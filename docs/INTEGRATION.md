@@ -22,19 +22,30 @@ In this model:
 
 Follow these steps to eliminate an in-tree test directory:
 
-#### Step 1: Replace custom assertions with native assertions or print statements
+#### Step 1: Migrate in-tree tests to lit
 
-Migrate tests using custom assertions (`test::assert_eq`, `test::assert_true`) to native Goose `assert` statements or diagnostic `print` statements verified by FileCheck:
+Migrate tests using custom assertions (`assert_eq`, `assert_true`) or mock clocks by importing `lit` in test files instead of bundling an in-tree test framework inside library sources:
 
 ```goose
-// Before (in-tree mock framework):
+// Before (in-tree framework bundled inside library core.goose):
 import core.test;
 fn test_parser() {
     let res = parse_frame(buf);
     test::assert_eq(res.magic, 0x4757);
 }
 
-// After (zero-footprint LIT test):
+// Option A: In-process testkit via lit import
+import std;
+import wing;
+import lit from "github.com/Lemon4ksan/goose-lit@v0.1.0";
+
+fn test_parser(t: lit::T&) {
+    let res, ok = parse_frame(buf);
+    lit::assert_ok(t, ok);
+    lit::assert_eq(t, res.magic, 0x4757);
+}
+
+// Option B: Zero-footprint LIT test with FileCheck
 // RUN: goose %s | %FileCheck %s
 import std;
 import wing;

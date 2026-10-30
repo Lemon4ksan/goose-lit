@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Lemon4ksan
 
 // High-resolution monotonic clock, duration arithmetic, and stopwatch utilities.
-namespace crap;
+namespace lit;
 
 import std;
 import os;

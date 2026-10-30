@@ -12,7 +12,6 @@ import std;
 import core.bytes;
 import core.proc;
 import core.time;
-import core.test;
 import core.config;
 
 // ---- filecheck verification engine ----------------------------------------
@@ -23,7 +22,12 @@ import wire.edge;
 import wire.mutate;
 import wire.inspect;
 
-// ---- in-process testkit & contained sandbox --------------------------------
+// ---- in-process unit testkit, assertions, mocks & sandbox ------------------
+import testkit.context;
+import testkit.diff;
+import testkit.assert;
+import testkit.mock;
+import testkit.runner;
 import testkit.testkit;
 import testkit.bench;
 

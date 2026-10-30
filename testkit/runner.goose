@@ -2,11 +2,11 @@
 // Copyright (c) 2026 Lemon4ksan
 
 // Subtest execution, table-driven runners, and test suite lifecycle management.
-namespace crap;
+namespace lit;
 
 import std;
 import core.time;
-import core.test.context;
+import testkit.context;
 
 fn run<F: fn(T&)>(test_context: T&, sub_name: const u8[:]) -> bool {
     if test_context.aborted { return false; }

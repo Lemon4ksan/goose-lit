@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Lemon4ksan
 
 // Test execution context, failure tracking, verbosity modes, and lifecycle state.
-namespace crap;
+namespace lit;
 
 import std;
 import os;

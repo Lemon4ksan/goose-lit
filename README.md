@@ -250,6 +250,49 @@ Inside `// RUN:` commands, goose-lit expands these substitutions:
 | `// REQUIRES: <features>` | Runs the test only if the host matches the listed features (`windows`, `linux`, `macos`, `x86_64`, `arm64`, `gcc`, `clang`). |
 | `// UNSUPPORTED: <features>` | Skips the test if the host matches the listed features. |
 
+## In-process test framework
+
+When writing unit tests, table-driven suites, or component tests, import `lit` directly. Assertions, mocks, deterministic clocks, and test runners reside in `lit::`:
+
+```goose
+// tests/unit_test.goose
+// RUN: goose %s | %FileCheck %s
+
+import std;
+import lit from "..";
+
+fn test_feature(t: lit::T&) {
+    lit::assert_true(t, 1 + 1 == 2, "arithmetic check");
+    lit::assert_eq(t, 42, 42);
+    lit::assert_contains(t, "user_id=123", "123");
+
+    // Mocks and fuzzing
+    var clock = lit::new_mock_clock();
+    lit::advance_ms(clock, 50);
+
+    var rng = lit::new_fuzz_rng();
+    let num = lit::next_range(rng, 1, 100);
+    lit::assert_ge(t, num, 1);
+}
+
+fn main() {
+    var runner = lit::new_runner("my_suite", lit::Verbosity.Golden);
+    runner.run_case("feature", test_feature);
+    runner.finish();
+}
+
+// CHECK: [PASS] feature
+// CHECK: SUITE: my_suite | PASS: 1/1 | FAIL: 0
+```
+
+Included utilities:
+- Assertions: `assert_true`, `assert_false`, `assert_eq`, `assert_ne`, `assert_bytes_eq`, `assert_struct_eq`, `assert_contains`, `assert_elements_match`, `assert_in_delta`, and aborting `require_*` equivalents.
+- Lifecycle: `T`, `Runner`, `new_runner`, `run_case`, `run` (subtests), `run_table` (table-driven tests).
+- Mocks: `MockClock`, `MockMonoClock`, `new_mock_clock`, `advance_ms`, `advance_sec`, `spy`, `record_call`.
+- Property testing: `FuzzRng`, `new_fuzz_rng`, `next_u64`, `next_range`, `next_bool`.
+- Latency & parity: `verify_latency_budget`, `verify_slice_parity`.
+- Sandboxing: `wait_contained_result`, `assert_balanced`.
+
 ## Wire verification API
 
 Tests can import `lit` directly to test packet decoders against split inputs or mutations:

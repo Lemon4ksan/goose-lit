@@ -2,11 +2,11 @@
 // Copyright (c) 2026 Lemon4ksan
 
 // Soft (assert_*) and hard (require_*) test assertions with failure context.
-namespace crap;
+namespace lit;
 
 import std;
-import core.test.context;
-import core.test.diff;
+import testkit.context;
+import testkit.diff;
 
 // Soft assertions (assert_*)
 
@@ -134,16 +134,14 @@ fn assert_le<Val>(t: T&, got: Val, bound: Val, label: const u8[:] = "") -> bool 
 }
 
 fn assert_in_delta(t: T&, got: f64, want: f64, delta: f64, label: const u8[:] = "") -> bool {
-    if t.aborted { return false; }
+    guard !t.aborted else { return false; }
     t.assertions_count += 1;
     let diff = ::abs(got - want);
-    if diff > delta {
-        var det: u8[..256] = [];
-        format(det, label, "\n  got: ", got, ", want: ", want, " (|diff|=", diff, " > ", delta, ")");
-        record_failure(t, "assert_in_delta exceeded", det[..]);
-        return false;
-    }
-    return true;
+    guard diff > delta else { return true; }
+    var det: u8[..256] = [];
+    format(det, label, "\n  got: ", got, ", want: ", want, " (|diff|=", diff, " > ", delta, ")");
+    record_failure(t, "assert_in_delta exceeded", det[..]);
+    return false;
 }
 
 fn assert_contains(t: T&, haystack: const u8[:], needle: const u8[:], label: const u8[:] = "") -> bool {
@@ -170,9 +168,19 @@ fn assert_not_contains(t: T&, haystack: const u8[:], needle: const u8[:], label:
     return true;
 }
 
+// Scans slice b for an unused occurrence of val
+fn find_unmatched_element<Val>(val: const Val&, b: const Val[:], used: bool[:]) -> i64 {
+    for j in b.len {
+        if !used[j] && val == b[j] {
+            return j;
+        }
+    }
+    return -1;
+}
+
 // Asserts that two slices contain the same elements regardless of order (up to 256 elements).
 fn assert_elements_match<Val>(t: T&, a: const Val[:], b: const Val[:], label: const u8[:] = "") -> bool {
-    if t.aborted { return false; }
+    guard !t.aborted else { return false; }
     t.assertions_count += 1;
     if a.len != b.len || b.len > 256 {
         var det: u8[..256] = [];
@@ -184,15 +192,10 @@ fn assert_elements_match<Val>(t: T&, a: const Val[:], b: const Val[:], label: co
     for i in b.len { used.push(false); }
 
     for i in a.len {
-        var found = false;
-        for j in b.len {
-            if !used[j] && a[i] == b[j] {
-                used[j] = true;
-                found = true;
-                break;
-            }
-        }
-        if !found {
+        let match_idx = find_unmatched_element(a[i], b, used[..]);
+        if match_idx >= 0 {
+            used[match_idx] = true;
+        } else {
             var det: u8[..256] = [];
             format(det, label, " element at a[", i, "] = ", a[i], " has no unmatched counterpart in b");
             record_failure(t, "assert_elements_match mismatch", det[..]);
