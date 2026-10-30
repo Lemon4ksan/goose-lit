@@ -1,0 +1,6 @@
+# .litconfig - Configuration for basic_project
+tests_dir = tests
+src_dir = sample.goose
+ceiling = 25.0
+cov = 0.85
+baseline = .lit-baseline

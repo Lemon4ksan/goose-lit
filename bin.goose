@@ -23,6 +23,7 @@ fn print_usage() {
     write_stdout("  version, -v            Print version\n");
     write_stdout("  help, -h               Print this help message\n\n");
     write_stdout("Options:\n");
+    write_stdout("  --config <file>        Load custom configuration file (default: .litconfig)\n");
     write_stdout("  --prefix <PREF>        FileCheck match prefix (default: CHECK)\n");
     write_stdout("  --verbose, -v          Verbose output of commands and matching\n");
     write_stdout("  --simd [byte]          SIMD lane match byte for inspect (default: '/')\n");
@@ -92,130 +93,7 @@ fn handle_filecheck(file_arg: const u8[:], prefix_arg: const u8[:]) -> i32 {
     return 0;
 }
 
-fn main() {
-    let all_args = args();
-    if all_args.len <= 1 {
-        print_usage();
-        return;
-    }
-
-    let first = all_args[1];
-
-    if first == "help" || first == "--help" || first == "-h" {
-        print_usage();
-        return;
-    }
-
-    if first == "version" || first == "--version" || first == "-v" {
-        write_stdout("goose-lit version ");
-        write_stdout(crap::trim_ascii(LIT_VERSION_BYTES));
-        write_stdout("\n");
-        return;
-    }
-
-    if first == "not" {
-        guard all_args.len > 2 else {
-            write_stdout("Error: not requires a command to run\n");
-            sys_exit(1);
-            return;
-        }
-        var cmd_str: u8[>..] = [];
-        var idx:     i64     = 2;
-        while idx < all_args.len {
-            if idx > 2 { cmd_str.push(' '); }
-            cmd_str.append(all_args[idx]);
-            idx++;
-        }
-        var run_out: u8[>..] = [];
-        let rc = crap::exec_capture(cmd_str[..], run_out);
-        write_stdout(run_out[..]);
-        if rc == 0 {
-            sys_exit(1);
-        } else {
-            sys_exit(0);
-        }
-        return;
-    }
-
-    if first == "filecheck" {
-        var prefix:      const u8[:] = "CHECK";
-        var file_target: const u8[:] = "";
-        var idx:         i64         = 2;
-        while idx < all_args.len {
-            let a = all_args[idx];
-            if (a == "--prefix" || a == "-prefix") && idx + 1 < all_args.len {
-                prefix = all_args[idx + 1];
-                idx++;
-            } else if !crap::slice_starts_with(a, "-") && file_target.len == 0 {
-                file_target = a;
-            }
-            idx++;
-        }
-        let rc = handle_filecheck(file_target, prefix);
-        sys_exit(rc);
-        return;
-    }
-
-    if first == "gate" {
-        let rc = crap::run_crap_cli();
-        sys_exit(rc);
-        return;
-    }
-
-    if first == "crap" {
-        let rc = crap::run_crap_cli();
-        sys_exit(rc);
-        return;
-    }
-
-    if first == "inspect" {
-        var target: const u8[:] = "";
-        var is_simd = false;
-        var simd_byte: u8  = 47; // '/'
-        var offset:    i64 = 0;
-
-        var idx: i64 = 2;
-        while idx < all_args.len {
-            let a = all_args[idx];
-            if a == "--simd" {
-                is_simd = true;
-                if idx + 1 < all_args.len && !crap::slice_starts_with(all_args[idx + 1], "-") {
-                    let sb = all_args[idx + 1];
-                    let num, ok = crap::parse_i64_slice(sb);
-                    if ok {
-                        simd_byte = (num & 0xFF) as! u8;
-                    } else if sb.len == 1 {
-                        simd_byte = sb[0];
-                    }
-                    idx++;
-                }
-            } else if a == "--offset" && idx + 1 < all_args.len {
-                let num, ok = crap::parse_i64_slice(all_args[idx + 1]);
-                if ok { offset = num; }
-                idx++;
-            } else if !crap::slice_starts_with(a, "-") && target.len == 0 {
-                target = a;
-            }
-            idx++;
-        }
-        let rc = handle_inspect(target, is_simd, simd_byte, offset);
-        sys_exit(rc);
-        return;
-    }
-
-    // Default mode: lit test runner over path or file
-    var target_path = first;
-    var verbose = false;
-
-    var idx: i64 = 2;
-    while idx < all_args.len {
-        let a = all_args[idx];
-        if a == "--verbose" || a == "-v" {
-            verbose = true;
-        }
-        idx++;
-    }
-
+fn run_lit_suite(target_path: const u8[:], verbose: bool) -> i32 {
     write_stdout("=== Goose LIT Test Runner ===\n");
 
     if file_exists(target_path) && !is_dir(target_path) {
@@ -229,7 +107,7 @@ fn main() {
             format(num_b, res.duration_us / 1000);
             write_stdout(num_b[..]);
             write_stdout(" ms)\n");
-            sys_exit(0);
+            return 0;
         } else if res.status == lit::TestStatus.XFail {
             write_stdout("XFAIL: ");
             write_stdout(target_path);
@@ -238,26 +116,25 @@ fn main() {
             format(num_b, res.duration_us / 1000);
             write_stdout(num_b[..]);
             write_stdout(" ms)\n");
-            sys_exit(0);
+            return 0;
         } else if res.status == lit::TestStatus.Unsupported {
             write_stdout("UNSUPPORTED: ");
             write_stdout(target_path);
             write_stdout("\n");
-            sys_exit(0);
+            return 0;
         } else if res.status == lit::TestStatus.XPass {
             write_stdout("XPASS: ");
             write_stdout(target_path);
             write_stdout("\n");
             write_stdout(res.diag[..]);
-            sys_exit(1);
+            return 1;
         } else {
             write_stdout("FAIL: ");
             write_stdout(target_path);
             write_stdout("\n");
             write_stdout(res.diag[..]);
-            sys_exit(1);
+            return 1;
         }
-        return;
     }
 
     var test_files: u8[>..] = [];
@@ -267,8 +144,7 @@ fn main() {
         write_stdout("No test files found in ");
         write_stdout(target_path);
         write_stdout("\n");
-        sys_exit(0);
-        return;
+        return 0;
     }
 
     var passed_count:      i64 = 0;
@@ -358,8 +234,185 @@ fn main() {
     write_stdout(" ms\n");
 
     if failed_count == 0 && xpass_count == 0 {
-        sys_exit(0);
+        return 0;
     } else {
-        sys_exit(1);
+        return 1;
     }
+}
+
+fn main() {
+    let all_args = args();
+
+    var custom_config: const u8[:] = "";
+    for ci in all_args.len {
+        if all_args[ci] == "--config" && ci + 1 < all_args.len {
+            custom_config = all_args[ci + 1];
+            break;
+        }
+    }
+    var lit_cfg = crap::LitConfig { .. };
+    crap::load_lit_config(custom_config, lit_cfg);
+
+    if all_args.len <= 1 {
+        if lit_cfg.tests_dir_buf.len > 0 && (is_dir(lit_cfg.tests_dir_buf[..]) || file_exists(lit_cfg.tests_dir_buf[..])) {
+            let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], false);
+            sys_exit(rc);
+            return;
+        } else if is_dir("tests") || file_exists("tests") {
+            let rc = run_lit_suite("tests", false);
+            sys_exit(rc);
+            return;
+        }
+        print_usage();
+        return;
+    }
+
+    let first = all_args[1];
+
+    if first == "help" || first == "--help" || first == "-h" {
+        print_usage();
+        return;
+    }
+
+    if first == "version" || first == "--version" || first == "-v" {
+        write_stdout("goose-lit version ");
+        write_stdout(crap::trim_ascii(LIT_VERSION_BYTES));
+        write_stdout("\n");
+        return;
+    }
+
+    if first == "not" {
+        guard all_args.len > 2 else {
+            write_stdout("Error: not requires a command to run\n");
+            sys_exit(1);
+            return;
+        }
+        var cmd_str: u8[>..] = [];
+        var idx:     i64     = 2;
+        while idx < all_args.len {
+            if idx > 2 { cmd_str.push(' '); }
+            cmd_str.append(all_args[idx]);
+            idx++;
+        }
+        var run_out: u8[>..] = [];
+        let rc = crap::exec_capture(cmd_str[..], run_out);
+        write_stdout(run_out[..]);
+        if rc == 0 {
+            sys_exit(1);
+        } else {
+            sys_exit(0);
+        }
+        return;
+    }
+
+    if first == "filecheck" {
+        var prefix_buf: u8[..32] = [];
+        if lit_cfg.prefix_buf.len > 0 {
+            prefix_buf.append(lit_cfg.prefix_buf[..]);
+        } else {
+            prefix_buf.append("CHECK");
+        }
+        var file_target: const u8[:] = "";
+        var idx:         i64         = 2;
+        while idx < all_args.len {
+            let a = all_args[idx];
+            if (a == "--prefix" || a == "-prefix") && idx + 1 < all_args.len {
+                prefix_buf.clear();
+                prefix_buf.append(all_args[idx + 1]);
+                idx++;
+            } else if a == "--config" && idx + 1 < all_args.len {
+                idx++;
+            } else if !crap::slice_starts_with(a, "-") && file_target.len == 0 {
+                file_target = a;
+            }
+            idx++;
+        }
+        let rc = handle_filecheck(file_target, prefix_buf[..]);
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "gate" {
+        let rc = crap::run_crap_cli();
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "crap" {
+        let rc = crap::run_crap_cli();
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "inspect" {
+        var target: const u8[:] = "";
+        var is_simd = false;
+        var simd_byte: u8  = 47; // '/'
+        var offset:    i64 = 0;
+
+        var idx: i64 = 2;
+        while idx < all_args.len {
+            let a = all_args[idx];
+            if a == "--simd" {
+                is_simd = true;
+                if idx + 1 < all_args.len && !crap::slice_starts_with(all_args[idx + 1], "-") {
+                    let sb = all_args[idx + 1];
+                    let num, ok = crap::parse_i64_slice(sb);
+                    if ok {
+                        simd_byte = (num & 0xFF) as! u8;
+                    } else if sb.len == 1 {
+                        simd_byte = sb[0];
+                    }
+                    idx++;
+                }
+            } else if a == "--offset" && idx + 1 < all_args.len {
+                let num, ok = crap::parse_i64_slice(all_args[idx + 1]);
+                if ok { offset = num; }
+                idx++;
+            } else if !crap::slice_starts_with(a, "-") && target.len == 0 {
+                target = a;
+            }
+            idx++;
+        }
+        let rc = handle_inspect(target, is_simd, simd_byte, offset);
+        sys_exit(rc);
+        return;
+    }
+
+    // Default mode: lit test runner over path or file
+    var cli_target: const u8[:] = "";
+    var verbose = false;
+
+    var idx: i64 = 1;
+    while idx < all_args.len {
+        let a = all_args[idx];
+        if a == "--verbose" || a == "-v" {
+            verbose = true;
+        } else if a == "--config" && idx + 1 < all_args.len {
+            idx++;
+        } else if !crap::slice_starts_with(a, "-") && cli_target.len == 0 {
+            cli_target = a;
+        }
+        idx++;
+    }
+
+    if cli_target.len > 0 {
+        let rc = run_lit_suite(cli_target, verbose);
+        sys_exit(rc);
+        return;
+    }
+
+    if lit_cfg.tests_dir_buf.len > 0 && (is_dir(lit_cfg.tests_dir_buf[..]) || file_exists(lit_cfg.tests_dir_buf[..])) {
+        let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose);
+        sys_exit(rc);
+        return;
+    }
+
+    if is_dir("tests") || file_exists("tests") {
+        let rc = run_lit_suite("tests", verbose);
+        sys_exit(rc);
+        return;
+    }
+
+    print_usage();
 }

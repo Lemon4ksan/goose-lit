@@ -13,6 +13,7 @@ import core.bytes;
 import core.proc;
 import core.time;
 import core.test;
+import core.config;
 
 // ---- filecheck verification engine ----------------------------------------
 import check.filecheck;

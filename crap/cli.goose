@@ -16,6 +16,7 @@ import crap.coverage.profile;
 import crap.metrics.crap;
 import crap.report.formatter;
 import crap.report.ratchet;
+import core.config;
 
 fn print_crap_usage() {
     write_stdout("Usage: goose-lit crap <path|file.goose> [options]\n");
@@ -36,9 +37,11 @@ fn print_crap_usage() {
     write_stdout("Reporting & CI Ratchet:\n");
     write_stdout("  --format <fmt>          Report format: table (default), md, json, gcc, sarif\n");
     write_stdout("  --out <file>            Write output report to file\n");
-    write_stdout("  --baseline <file>       Compare against baseline for CI ratchet gate\n");
-    write_stdout("  --save-baseline <file>  Save current analysis as baseline snapshot\n");
+    write_stdout("  --baseline <file>       Compare against baseline (default: .lit-baseline if present)\n");
+    write_stdout("  --no-baseline           Disable automatic baseline comparison\n");
+    write_stdout("  --save-baseline [file]  Save analysis as baseline snapshot (default: .lit-baseline)\n");
     write_stdout("  --delta <val>           G-CRAP regression tolerance for ratchet (default 5.0)\n");
+    write_stdout("  --config <file>         Load custom configuration file (default: .litconfig)\n");
     write_stdout("  --help, -h              Print this help text\n\n");
 }
 
@@ -66,32 +69,59 @@ fn resolve_crap_shim_path(out: u8[>..]&) -> bool {
 
 fn run_crap_cli() -> i32 {
     let all_args = args();
-    if all_args.len <= 2 {
-        print_crap_usage();
-        return 1;
-    }
 
-    var target_arg:       const u8[:] = "";
+    // 1. Scan for custom config file and load LitConfig
+    var custom_config: const u8[:] = "";
+    for ci in all_args.len {
+        if all_args[ci] == "--config" && ci + 1 < all_args.len {
+            custom_config = all_args[ci + 1];
+            break;
+        }
+    }
+    var lit_cfg = LitConfig { .. };
+    load_lit_config(custom_config, lit_cfg);
+
+    var target_arg_buf: u8[..256] = [];
+    if lit_cfg.src_dir_buf.len > 0 {
+        target_arg_buf.append(lit_cfg.src_dir_buf[..]);
+    }
     var cover_test_files: u8[>..]     = [];
     var bce_file:         const u8[:] = "";
     var auto_bce = false;
     var specs_file: const u8[:] = "";
     var auto_specs = false;
-    var cov_files:               u8[>..]     = [];
-    var lcov_file:               const u8[:] = "";
-    var out_file:                const u8[:] = "";
-    var baseline_file:           const u8[:] = "";
-    var save_baseline_file_path: const u8[:] = "";
-    var format_mode:             const u8[:] = "table";
+    var cov_files:    u8[>..]     = [];
+    var lcov_file:    const u8[:] = "";
+    var out_file:     const u8[:] = "";
+    var baseline_buf: u8[..256]   = [];
+    if lit_cfg.baseline_buf.len > 0 {
+        baseline_buf.append(lit_cfg.baseline_buf[..]);
+    }
+    var save_baseline_buf: u8[..256] = [];
+    var format_buf:        u8[..32]  = [];
+    if lit_cfg.format_buf.len > 0 {
+        format_buf.append(lit_cfg.format_buf[..]);
+    } else {
+        format_buf.append("table");
+    }
+    var no_baseline = false;
 
     var cfg = default_risk_config();
-    var delta_threshold: f64 = 5.0;
-    var include_tests = false;
+    if lit_cfg.has_default_cov {
+        cfg.default_cov = lit_cfg.default_cov;
+    }
+    var delta_threshold: f64 = if lit_cfg.has_delta { lit_cfg.delta_threshold } else { 5.0 };
+    var include_tests = if lit_cfg.has_include_tests { lit_cfg.include_tests } else { false };
     var enforce_gate = false;
-    var gate_ceiling: f64 = 25.0;
+    var gate_ceiling: f64 = if lit_cfg.has_gate_ceiling { lit_cfg.gate_ceiling } else { 25.0 };
 
     if all_args.len > 1 && all_args[1] == "gate" {
         enforce_gate = true;
+    }
+
+    if all_args.len <= 2 && target_arg_buf.len == 0 {
+        print_crap_usage();
+        return 1;
     }
 
     var i: i64 = 2;
@@ -163,17 +193,29 @@ fn run_crap_cli() -> i32 {
             cfg.has_coverage_profile = true;
             i++;
         } else if arg == "--format" && i + 1 < all_args.len {
-            format_mode = all_args[i + 1];
+            format_buf.clear();
+            format_buf.append(all_args[i + 1]);
             i++;
         } else if arg == "--out" && i + 1 < all_args.len {
             out_file = all_args[i + 1];
             i++;
+        } else if arg == "--config" && i + 1 < all_args.len {
+            i++;
+        } else if arg == "--no-baseline" {
+            no_baseline = true;
+            baseline_buf.clear();
         } else if arg == "--baseline" && i + 1 < all_args.len {
-            baseline_file = all_args[i + 1];
+            baseline_buf.clear();
+            baseline_buf.append(all_args[i + 1]);
             i++;
-        } else if arg == "--save-baseline" && i + 1 < all_args.len {
-            save_baseline_file_path = all_args[i + 1];
-            i++;
+        } else if arg == "--save-baseline" {
+            if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "-") {
+                save_baseline_buf.clear();
+                save_baseline_buf.append(all_args[i + 1]);
+                i++;
+            } else {
+                default_save_baseline_path(lit_cfg.baseline_buf[..], save_baseline_buf);
+            }
         } else if arg == "--default-cov" && i + 1 < all_args.len {
             let val, ok = parse_f64_slice(all_args[i + 1]);
             if ok { cfg.default_cov = val; }
@@ -195,8 +237,8 @@ fn run_crap_cli() -> i32 {
             if ok { delta_threshold = val; }
             i++;
         } else if !slice_starts_with(arg, "-") {
-            if target_arg.len == 0 {
-                target_arg = arg;
+            if target_arg_buf.len == 0 {
+                target_arg_buf.append(arg);
             } else if enforce_gate {
                 let val, ok = parse_f64_slice(arg);
                 if ok {
@@ -206,6 +248,16 @@ fn run_crap_cli() -> i32 {
         }
         i++;
     }
+
+    // Auto-resolve baseline snapshot if not explicitly specified, not disabled, and not saving
+    if baseline_buf.len == 0 && !no_baseline && save_baseline_buf.len == 0 {
+        resolve_baseline_path(lit_cfg.baseline_buf[..], baseline_buf);
+    }
+
+    let save_baseline_file_path: const u8[:] = save_baseline_buf[..];
+    let baseline_file:           const u8[:] = baseline_buf[..];
+    let format_mode:             const u8[:] = format_buf[..];
+    let target_arg:              const u8[:] = target_arg_buf[..];
 
     var target_buf: u8[>..] = [];
     if target_arg.len > 0 {

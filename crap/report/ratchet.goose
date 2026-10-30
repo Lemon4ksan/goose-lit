@@ -172,6 +172,9 @@ fn check_ratchet_gate(
 
     var violations: i32 = 0;
     out.append("=== goose-crap CI Ratchet Gate Evaluation ===\n");
+    out.append("Baseline: ");
+    out.append(baseline_path);
+    out.append("\n");
 
     for fi in functions.len {
         let fn_info = functions[fi];

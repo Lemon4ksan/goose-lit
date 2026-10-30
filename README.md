@@ -158,6 +158,7 @@ goose-lit gate src/ 25.0 --cov 0.85
 
 | Flag | Supported in | Description |
 | :--- | :--- | :--- |
+| `--config <file>` | all | Loads custom configuration file (default: `.litconfig`). |
 | `--prefix <PREF>` | `filecheck` | Configures FileCheck pattern prefix (default: `CHECK`). |
 | `--verbose`, `-v` | `<path>`, `gate`, `crap` | Shows command output and execution time. |
 | `--simd [byte]` | `inspect` | Displays 128-bit SIMD lane inspection matching byte (default: `/`). |
@@ -167,10 +168,41 @@ goose-lit gate src/ 25.0 --cov 0.85
 | `--threshold <val>` | `crap` | Sets G-CRAP warning threshold (default: `25.0`). |
 | `--format <fmt>` | `crap`, `gate` | Output format: `table` (default), `md`, `json`, `gcc`, or `sarif`. |
 | `--out <file>` | `crap`, `gate` | Writes report to `<file>`. |
-| `--baseline <file>` | `crap`, `gate` | Compares metrics against baseline file. |
-| `--save-baseline <f>`| `crap`, `gate` | Writes current metrics to baseline file. |
+| `--baseline <file>` | `crap`, `gate` | Compares metrics against baseline file (default: `.lit-baseline` if present). |
+| `--no-baseline` | `crap`, `gate` | Disables automatic baseline comparison. |
+| `--save-baseline [f]`| `crap`, `gate` | Writes current metrics to baseline file (default: `.lit-baseline`). |
 | `--delta <val>` | `gate` | Allowed G-CRAP increase above baseline (default: `5.0`). |
 | `--include-tests` | `crap`, `gate` | Includes test files in analysis. |
+
+## Configuration
+
+goose-lit loads settings from `.litconfig` or `lit.conf` in the current or parent directory. CLI flags override file settings.
+
+Example `.litconfig`:
+
+```ini
+# .litconfig
+baseline = .lit-baseline
+ceiling = 25.0
+cov = 0.85
+delta = 5.0
+format = table
+prefix = CHECK
+tests_dir = tests
+src_dir = src
+include_tests = false
+```
+
+Configuration keys:
+- `baseline`: path to baseline snapshot file for ratchet comparisons.
+- `ceiling`: G-CRAP gate ceiling (default: `25.0`).
+- `cov`: default branch coverage (default: `0.0`).
+- `delta`: regression tolerance over baseline (default: `5.0`).
+- `format`: output format (`table`, `md`, `json`, `gcc`, `sarif`).
+- `prefix`: FileCheck directive prefix (default: `CHECK`).
+- `tests_dir`: directory scanned when running tests without arguments.
+- `src_dir`: target directory for G-CRAP analysis.
+- `include_tests`: include test files in complexity analysis (`true` or `false`).
 
 ## Directives reference
 

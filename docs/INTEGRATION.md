@@ -194,5 +194,6 @@ filecheck target:
 ## Example project
 
 A minimal example project is located in [`examples/basic_project`](../examples/basic_project/):
+- [`examples/basic_project/.litconfig`](../examples/basic_project/.litconfig): configuration file setting test directory and gate defaults.
 - [`examples/basic_project/sample.goose`](../examples/basic_project/sample.goose): library module with no test dependencies.
 - [`examples/basic_project/tests/verify_sample.goose`](../examples/basic_project/tests/verify_sample.goose): external verification test specifying `// RUN: goose %s | %FileCheck %s`.
