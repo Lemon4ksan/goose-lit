@@ -8,6 +8,8 @@ import lit from ".";
 
 extern fn sys_exit(code: i32) = "exit";
 
+const LIT_VERSION_BYTES: const u8[:] = embed_file("version.txt");
+
 fn print_usage() {
     write_stdout("Usage: goose-lit [subcommand|path] [options]\n\n");
     write_stdout("Test runner, FileCheck matcher, binary wire stream verifier, and G-CRAP risk analyzer for Goose.\n\n");
@@ -105,7 +107,9 @@ fn main() {
     }
 
     if first == "version" || first == "--version" || first == "-v" {
-        write_stdout("goose-lit version 0.1.0\n");
+        write_stdout("goose-lit version ");
+        write_stdout(crap::trim_ascii(LIT_VERSION_BYTES));
+        write_stdout("\n");
         return;
     }
 
@@ -116,7 +120,7 @@ fn main() {
             return;
         }
         var cmd_str: u8[>..] = [];
-        var idx: i64 = 2;
+        var idx:     i64     = 2;
         while idx < all_args.len {
             if idx > 2 { cmd_str.push(' '); }
             cmd_str.append(all_args[idx]);
@@ -134,9 +138,9 @@ fn main() {
     }
 
     if first == "filecheck" {
-        var prefix: const u8[:] = "CHECK";
+        var prefix:      const u8[:] = "CHECK";
         var file_target: const u8[:] = "";
-        var idx: i64 = 2;
+        var idx:         i64         = 2;
         while idx < all_args.len {
             let a = all_args[idx];
             if (a == "--prefix" || a == "-prefix") && idx + 1 < all_args.len {
@@ -167,8 +171,8 @@ fn main() {
     if first == "inspect" {
         var target: const u8[:] = "";
         var is_simd = false;
-        var simd_byte: u8 = 47; // '/'
-        var offset: i64 = 0;
+        var simd_byte: u8  = 47; // '/'
+        var offset:    i64 = 0;
 
         var idx: i64 = 2;
         while idx < all_args.len {
@@ -267,12 +271,12 @@ fn main() {
         return;
     }
 
-    var passed_count: i64 = 0;
-    var failed_count: i64 = 0;
-    var xfail_count: i64 = 0;
-    var xpass_count: i64 = 0;
+    var passed_count:      i64 = 0;
+    var failed_count:      i64 = 0;
+    var xfail_count:       i64 = 0;
+    var xpass_count:       i64 = 0;
     var unsupported_count: i64 = 0;
-    var total_time_us: i64 = 0;
+    var total_time_us:     i64 = 0;
 
     var cur: i64 = 0;
     let n = test_files.len;
@@ -357,13 +361,5 @@ fn main() {
         sys_exit(0);
     } else {
         sys_exit(1);
-    }
-    write_stdout(tot_ms_b[..]);
-    write_stdout(" ms\n");
-
-    if failed_count > 0 {
-        sys_exit(1);
-    } else {
-        sys_exit(0);
     }
 }

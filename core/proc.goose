@@ -17,12 +17,17 @@ extern fn native_host_os() -> i32 = "crap_host_os";
 extern fn native_host_arch() -> i32 = "crap_host_arch";
 extern fn native_cpu_count() -> i32 = "crap_cpu_count";
 
+var g_cmd_seq: u64 = 0;
+
 // Runs an external command and captures its combined stdout/stderr into `out`.
 // Returns the process exit status.
 fn exec_capture(cmd: const u8[:], out: u8[>..]&) -> i32 {
+    g_cmd_seq += 1;
     var tmp_path: u8[>..] = [];
     tmp_path.append(".gcrap_cmd_");
-    append_u64(tmp_path, (clock_ns() as u64) & 0xFFFFFF);
+    append_u64(tmp_path, clock_ns() as u64);
+    tmp_path.push('_');
+    append_u64(tmp_path, g_cmd_seq);
     tmp_path.append(".tmp");
 
     let rc = native_exec_to_file(cmd, tmp_path);
