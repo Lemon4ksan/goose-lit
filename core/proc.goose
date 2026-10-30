@@ -17,14 +17,54 @@ extern fn native_host_os() -> i32 = "crap_host_os";
 extern fn native_host_arch() -> i32 = "crap_host_arch";
 extern fn native_cpu_count() -> i32 = "crap_cpu_count";
 
-var g_cmd_seq: u64 = 0;
+var g_cmd_seq:         u64  = 0;
+var g_cache_dir_ready: bool = false;
+
+// Cleans up any leftover .gcrap_cmd_*.tmp scratch files in .lit/cache/
+fn clean_stale_cache() {
+    guard is_dir(".lit/cache") else { return; }
+    var entries: u8[>..] = [];
+    guard list_dir(".lit/cache", entries) else { return; }
+    var start: i64 = 0;
+    for i in entries.len {
+        if entries[i] == '\n' {
+            let name = trim_ascii(entries[start..i]);
+            start = i + 1;
+            if slice_starts_with(name, ".gcrap_cmd_") && slice_ends_with(name, ".tmp") {
+                var full_path: u8[>..] = [];
+                full_path.append(".lit/cache/");
+                full_path.append(name);
+                delete_file(full_path[..]);
+            }
+        }
+    }
+}
+
+// Ensures the .lit/cache temporary directory exists.
+fn ensure_lit_cache_dir() {
+    if g_cache_dir_ready { return; }
+    if !is_dir(".lit") {
+        make_dir(".lit");
+    }
+    if !is_dir(".lit/cache") {
+        make_dir(".lit/cache");
+    }
+    clean_stale_cache();
+    g_cache_dir_ready = true;
+}
 
 // Runs an external command and captures its combined stdout/stderr into `out`.
 // Returns the process exit status.
 fn exec_capture(cmd: const u8[:], out: u8[>..]&) -> i32 {
     g_cmd_seq += 1;
+    ensure_lit_cache_dir();
+
     var tmp_path: u8[>..] = [];
-    tmp_path.append(".gcrap_cmd_");
+    if is_dir(".lit/cache") {
+        tmp_path.append(".lit/cache/.gcrap_cmd_");
+    } else {
+        tmp_path.append(".gcrap_cmd_");
+    }
     append_u64(tmp_path, clock_ns() as u64);
     tmp_path.push('_');
     append_u64(tmp_path, g_cmd_seq);

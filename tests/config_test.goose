@@ -54,7 +54,7 @@ fn test_parse_config() {
 
     var empty_save: u8[..256] = [];
     crap::default_save_baseline_path("", empty_save);
-    assert(empty_save == ".lit-baseline");
+    assert(empty_save == ".lit/baseline" || empty_save == ".lit-baseline");
 }
 
 fn main() {

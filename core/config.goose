@@ -193,12 +193,16 @@ fn resolve_baseline_path(configured_baseline: const u8[:], out: u8[..256]&) -> b
         out.append(configured_baseline);
         return true;
     }
+    if file_exists(".lit/baseline") {
+        out.append(".lit/baseline");
+        return true;
+    }
     if file_exists(".lit-baseline") {
         out.append(".lit-baseline");
         return true;
     }
-    if file_exists(".lit/baseline") {
-        out.append(".lit/baseline");
+    if file_exists("../.lit/baseline") {
+        out.append("../.lit/baseline");
         return true;
     }
     if file_exists("../.lit-baseline") {
@@ -212,6 +216,8 @@ fn default_save_baseline_path(configured_baseline: const u8[:], out: u8[..256]&)
     out.clear();
     if configured_baseline.len > 0 {
         out.append(configured_baseline);
+    } else if is_dir(".lit") || make_dir(".lit") {
+        out.append(".lit/baseline");
     } else {
         out.append(".lit-baseline");
     }

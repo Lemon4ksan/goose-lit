@@ -76,11 +76,25 @@ goose build --cc gcc -O2 -o bin/goose-lit.exe bin.goose
 
 ### Running tests
 
-Run all tests in a directory or execute a single test file:
+Run all tests in the project (reads `tests_dir` from `.litconfig` or scans `tests/`):
+
+```bash
+goose-lit
+```
+
+Or target a specific directory or file:
 
 ```bash
 goose-lit tests/
+goose-lit tests/my_feature_test.goose
 ```
+
+Test discovery and execution rules:
+- Files with `// RUN:` directives: executes each declared command pipeline in sequence.
+- Files with `// CHECK:` patterns: automatically executes `goose %s | %FileCheck %s`.
+- Test files (`*_test.goose` or files declaring `fn main`): automatically executes `goose %s`.
+- Interface tests without `main`: verified with `goose check %s`.
+- Captured command output and temporary buffers are kept in `.lit/cache/` and cleaned up automatically.
 
 Example output:
 ```text

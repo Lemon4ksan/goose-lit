@@ -27,3 +27,4 @@ vendor/
 *.gcrap-cov.raw
 *.gcrap_bak
 .system_generated/
+.lit/cache/

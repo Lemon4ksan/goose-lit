@@ -34,12 +34,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $testFiles = @(
+    "tests/auto_runner_test.goose",
     "tests/bench_test.goose",
     "tests/config_test.goose",
     "tests/filecheck_test.goose",
     "tests/gate_test.goose",
     "tests/inspect_test.goose",
     "tests/pipeline_test.goose",
+    "tests/standalone_unit_test.goose",
     "tests/testkit_test.goose",
     "tests/wire_test.goose"
 )

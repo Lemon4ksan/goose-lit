@@ -205,6 +205,68 @@ fn substitute_lit_command(
     }
 }
 
+// Evaluates whether source content contains any FileCheck pattern directives.
+// crap:trusted
+// crap:trusted-bounds
+fn has_filecheck_directives(src: const u8[:]) -> bool {
+    guard src.len > 0 else { return false; }
+    if crap::slice_contains(src, "// CHECK:") { return true; }
+    if crap::slice_contains(src, "// CHECK-NEXT:") { return true; }
+    if crap::slice_contains(src, "// CHECK-NOT:") { return true; }
+    if crap::slice_contains(src, "// CHECK-DAG:") { return true; }
+    if crap::slice_contains(src, "// CHECK-LABEL:") { return true; }
+    if crap::slice_contains(src, "// CHECK-SAME:") { return true; }
+    if crap::slice_contains(src, "// CHECK-EMPTY:") { return true; }
+    return crap::slice_contains(src, "// CHECK-COUNT-");
+}
+
+// Evaluates whether source content declares an entry main function.
+// crap:trusted
+// crap:trusted-bounds
+fn has_main_function(src: const u8[:]) -> bool {
+    guard src.len > 0 else { return false; }
+    return crap::slice_contains(src, "fn main(") || crap::slice_contains(src, "fn main (");
+}
+
+// Determines the default command string when a test file omits // RUN: directives.
+// crap:trusted
+// crap:trusted-bounds
+fn default_run_command(file_path: const u8[:], src: const u8[:]) -> const u8[:] {
+    if has_filecheck_directives(src) {
+        return "goose %s | %FileCheck %s";
+    }
+    if has_main_function(src) || crap::slice_ends_with(file_path, "_test.goose") {
+        return "goose %s";
+    }
+    return "goose check %s";
+}
+
+// Checks if a discovered file should be executed as a test.
+// crap:trusted
+// crap:trusted-bounds
+fn is_test_candidate(path: const u8[:], name: const u8[:]) -> bool {
+    guard name.len > 0 else { return false; }
+    if crap::slice_ends_with(name, ".lit") { return true; }
+    if crap::slice_ends_with(name, "_test.goose") { return true; }
+    if crap::slice_starts_with(name, "test_") && crap::slice_ends_with(name, ".goose") { return true; }
+    if crap::slice_ends_with(name, ".goose") {
+        if crap::slice_contains(path, "/tests/") || crap::slice_contains(path, "\\tests\\") ||
+           crap::slice_contains(path, "/test/") || crap::slice_contains(path, "\\test\\") ||
+           crap::slice_starts_with(path, "tests/") || crap::slice_starts_with(path, "tests\\") ||
+           crap::slice_starts_with(path, "test/") || crap::slice_starts_with(path, "test\\") {
+            return true;
+        }
+        var head: u8[>..] = [];
+        if read_file(path, head) {
+            let max_scan = if head.len > 1024 { 1024 } else { head.len };
+            if crap::slice_contains(head[..max_scan], "// RUN:") {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Executes all // RUN: directives in a single test file.
 fn run_single_lit_test(
     file_path: const u8[:],
@@ -283,7 +345,7 @@ fn run_single_lit_test(
             line_no: 1,
             command: [],
         };
-        let def_cmd = "goose check %s";
+        let def_cmd = default_run_command(file_path, src[..]);
         for b in def_cmd {
             if def_dir.command.len < def_dir.command.cap {
                 def_dir.command.push(b);
@@ -438,7 +500,7 @@ fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
                     if is_dir(child[..]) {
                         dir_queue.append(child[..]);
                         dir_queue.push('\n');
-                    } else if crap::slice_ends_with(name, ".goose") || crap::slice_ends_with(name, ".lit") {
+                    } else if is_test_candidate(child[..], name) {
                         out_paths.append(child[..]);
                         out_paths.push('\n');
                         count += 1;
