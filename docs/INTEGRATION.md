@@ -1,50 +1,28 @@
-# Integrating goose-lit into Goose Projects
+# Integrating goose-lit into Goose projects
 
-This guide details how to integrate `goose-lit` into Goose projects, including automated continuous integration (CI) workflows, `Justfile` task automation, and migrating systems libraries to a **Zero-Footprint Testing** model.
+This guide covers CI workflows, Justfile recipes, and how to test Goose libraries without compiling test frameworks into production binaries.
 
----
+## Zero-footprint testing
 
-## Zero-Footprint Testing Guide
+### Problems with bundled test frameworks
 
-### The Problem with Bundled Test Frameworks
+When a library exports test harnesses from its core modules (for example, `core/test/` imported inside `core.goose`):
+- Assertion helpers, string formatters, and mock structs compile into release binaries.
+- Tests written against internal mock structures do not verify raw wire bytes, which can mask framing bugs and slice boundary errors.
+- Test utilities clutter the public module namespace.
 
-High-performance networking and systems libraries (such as `goose-wing`) operate under strict constraints:
-- **Zero dynamic memory allocation** on wire parsing and serialization hot paths.
-- **Dead code elimination**: Every symbol included in production binaries increases attack surface, cache pressure, and binary size.
-- **Boundary discipline**: Protocols must be validated at the ingress boundary (`const u8[:]`) without internal white-box mocks that bypass protocol state machines.
+### The zero-footprint model
 
-When a repository bundles test harnesses directly into production modules (e.g. `core/test/` included in `core.goose`):
-1. **Symbol and Binary Pollution**: Assertion helpers, string diff engines, and mock structures compile into release artifacts unless conditionally compiled out.
-2. **Artificial Mock Couplings**: Developers are tempted to write unit tests against internal mock structs rather than raw wire bytes, hiding RFC framing violations, fragmented packets, and buffer boundary regressions.
-3. **Namespace Clutter**: Exported test utilities risk accidental usage by downstream consumers.
+In this model:
+- Production modules contain no test runners, mocks, or assertion functions.
+- Test files are standalone `.goose` programs executed as separate processes. goose-lit verifies standard output against `// CHECK:` patterns.
+- Stream verification (`lit::verify_split_stream`) and mutation (`lit::mutate_stream`) run only in test binaries.
 
-### The Zero-Footprint Model
+### Removing in-tree test code
 
-`goose-lit` adopts the LLVM LIT / FileCheck architecture:
+Follow these steps to eliminate an in-tree test directory:
 
-```
-┌────────────────────────────────────────────────────────┐
-│                      goose-lit                         │
-│  (External Verification Binary & Static Risk Analyzer) │
-└───────────┬────────────────────────────────┬───────────┘
-            │ Subprocess Execution           │ Static Analysis
-            ▼                                ▼
-┌────────────────────────┐      ┌────────────────────────┐
-│ Standalone Test File   │      │ Production Core        │
-│ // RUN: goose %s | ... │      │ (e.g. core.goose)      │
-│ // CHECK: pattern      │      │ Zero test code bundled │
-└────────────────────────┘      └────────────────────────┘
-```
-
-- **Pure Production Targets**: `core.goose` and `wing.goose` contain zero test runners, zero mocks, and zero assertion harnesses.
-- **Out-of-Process Black-Box Execution**: Test suites are standalone `.goose` files executed as separate binaries. `goose-lit` verifies standard output streams against `// CHECK:` patterns.
-- **Zero-Allocation Stream Verification**: Wire edge testing (`lit::verify_split_stream`) and fuzz mutation (`lit::mutate_stream`) operate purely on borrowed slices (`const u8[:]`) in isolated test binaries.
-
-### Step-by-Step: Removing `core/test/` from `goose-wing`
-
-Follow these steps to eliminate the `core/test/` footprint from `goose-wing`:
-
-#### Step 1: Replace `core::test` Assertions with Native Assertions & Output
+#### Step 1: Replace custom assertions with native assertions or print statements
 
 Migrate tests using custom assertions (`test::assert_eq`, `test::assert_true`) to native Goose `assert` statements or diagnostic `print` statements verified by FileCheck:
 
@@ -69,9 +47,9 @@ fn main() {
 // CHECK: MAGIC: 18263
 ```
 
-#### Step 2: Migrate Wire Edge Testing to External `goose-lit`
+#### Step 2: Move wire tests to external test files
 
-For protocol framing and partial-slice edge testing, import `lit` only inside test files (e.g. `tests/lit/verify_wire.goose`), never in library sources:
+For protocol framing and partial-slice tests, import `lit` inside test files (e.g. `tests/lit/verify_wire.goose`), not in library sources:
 
 ```goose
 // RUN: goose check %s
@@ -86,9 +64,9 @@ fn test_framer() {
 }
 ```
 
-#### Step 3: Remove `core/test/` Invocations and Directory
+#### Step 3: Delete the test directory and remove the import
 
-1. In `core.goose`, remove any test harness exports:
+1. In the main module, remove the test import:
    ```diff
    - import core.test;
    ```
@@ -99,11 +77,9 @@ fn test_framer() {
    goose check wing.goose
    ```
 
----
+## Continuous integration workflow
 
-## Continuous Integration Workflow (GitHub Actions)
-
-Add the following workflow file (`.github/workflows/lit.yml`) to run tests and enforce G-CRAP safety gates in CI:
+Add this workflow (`.github/workflows/lit.yml`) to run tests and enforce G-CRAP safety gates in GitHub Actions:
 
 ```yaml
 name: Test Verification
@@ -176,11 +152,9 @@ jobs:
         run: goose-lit gate src/ 25.0 --cov 0.85
 ```
 
----
+## Justfile recipes
 
-## Justfile Integration Recipes
-
-Add these recipes to your project's `Justfile` for local developer workflow parity with CI:
+Add these recipes to your project's `Justfile` for local testing:
 
 ```just
 # Task runner recipes for LIT testing and G-CRAP gating
@@ -217,11 +191,8 @@ filecheck target:
     goose-lit filecheck {{target}}
 ```
 
----
+## Example project
 
-## Minimal Example Project Reference
-
-A working minimal example project demonstrating zero-footprint testing with `goose-lit` is located in [`examples/basic_project`](../examples/basic_project/):
-
-- [`examples/basic_project/sample.goose`](../examples/basic_project/sample.goose): Pure library module containing zero test dependencies or harnesses.
-- [`examples/basic_project/tests/verify_sample.goose`](../examples/basic_project/tests/verify_sample.goose): External verification test specifying `// RUN: goose %s | %FileCheck %s` and pattern matching.
+A minimal example project is located in [`examples/basic_project`](../examples/basic_project/):
+- [`examples/basic_project/sample.goose`](../examples/basic_project/sample.goose): library module with no test dependencies.
+- [`examples/basic_project/tests/verify_sample.goose`](../examples/basic_project/tests/verify_sample.goose): external verification test specifying `// RUN: goose %s | %FileCheck %s`.
