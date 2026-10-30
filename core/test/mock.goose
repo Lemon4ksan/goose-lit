@@ -117,15 +117,15 @@ fn next_ascii_string<B>(rng: FuzzRng&, out: B&, length: i64) {
 // Typed test spies & stubs (CallRecord)
 
 struct CallRecord<Args, Ret> {
-    call_count: i64 = 0,
-    last_args: Args,
+    call_count:    i64 = 0,
+    last_args:     Args,
     canned_return: Ret,
 }
 
 fn spy<Args, Ret>(canned: Ret) -> CallRecord<Args, Ret> {
     return CallRecord<Args, Ret> {
-        call_count: 0,
-        last_args: Args { .. },
+        call_count:    0,
+        last_args:     Args { .. },
         canned_return: canned,
     };
 }

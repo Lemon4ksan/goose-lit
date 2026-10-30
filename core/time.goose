@@ -7,13 +7,13 @@ namespace crap;
 import std;
 import os;
 
-const NANOSECOND: i64 = 1;
+const NANOSECOND:  i64 = 1;
 const MICROSECOND: i64 = 1000 * NANOSECOND;
 const MILLISECOND: i64 = 1000 * MICROSECOND;
-const SECOND: i64 = 1000 * MILLISECOND;
-const MINUTE: i64 = 60 * SECOND;
-const HOUR: i64 = 60 * MINUTE;
-const DAY: i64 = 24 * HOUR;
+const SECOND:      i64 = 1000 * MILLISECOND;
+const MINUTE:      i64 = 60 * SECOND;
+const HOUR:        i64 = 60 * MINUTE;
+const DAY:         i64 = 24 * HOUR;
 
 struct Duration {
     nanos: i64 = 0,

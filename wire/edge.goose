@@ -15,10 +15,10 @@ const VIRTUAL_PAGE_SIZE: i64 = 65536;
 // Expects prefix_checker to return incomplete_code and not abort or crash.
 // Finally verifies the full payload against ok_code.
 fn verify_split_stream<F: fn(const u8[:]) -> i64>(
-    full_payload: const u8[:],
+    full_payload:    const u8[:],
     incomplete_code: i64,
-    ok_code: i64,
-    out_diag: u8[>..]&,
+    ok_code:         i64,
+    out_diag:        u8[>..]&,
 ) -> bool {
     let total_len = full_payload.len;
     guard total_len > 0 else {

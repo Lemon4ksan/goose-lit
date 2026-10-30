@@ -101,7 +101,7 @@ fn format_simd_lanes(buf: const u8[:], target_b: u8, base_addr: i64, out: u8[>..
     }
     out.append("]\n");
 
-    var bitmask: u32 = 0;
+    var bitmask:       u32 = 0;
     var matches_count: u32 = 0;
 
     out.append("  Match: [ ");

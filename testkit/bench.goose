@@ -10,9 +10,9 @@ import core.bytes;
 
 // Verifies that average execution time does not exceed the specified nanosecond budget.
 fn verify_latency_budget<F: fn()>(
-    iterations: i64,
+    iterations:    i64,
     max_ns_per_op: i64,
-    out_diag: u8[>..]&,
+    out_diag:      u8[>..]&,
 ) -> bool {
     guard iterations > 0 else {
         out_diag.append("verify_latency_budget: iterations must be > 0\n");
@@ -49,7 +49,7 @@ fn verify_latency_budget<F: fn()>(
 
 // Verifies bit-exact output parity between two function implementations over an input slice.
 fn verify_slice_parity<F1: fn(const u8[:]) -> i64, F2: fn(const u8[:]) -> i64>(
-    input: const u8[:],
+    input:    const u8[:],
     out_diag: u8[>..]&,
 ) -> bool {
     let r1 = F1(input);

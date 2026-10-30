@@ -31,8 +31,8 @@ fn run<F: fn(T&)>(test_context: T&, sub_name: const u8[:]) -> bool {
 // Table-driven test runner
 fn run_table<Row, F: fn(T&, const Row&, i64)>(
     test_context: T&,
-    table_name: const u8[:],
-    rows: const Row[:],
+    table_name:   const u8[:],
+    rows:         const Row[:],
 ) -> bool {
     if test_context.aborted { return false; }
     var all_ok = true;

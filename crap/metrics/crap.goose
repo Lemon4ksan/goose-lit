@@ -18,9 +18,9 @@ fn cube_f64(x: f64) -> f64 {
 
 // Computes classic CRAP and modified G-CRAP for each function.
 fn compute_crap_metrics(
-    cfg: const RiskConfig&,
+    cfg:       const RiskConfig&,
     functions: FunctionInfo[>..]&,
-    branches: const BranchSite[:],
+    branches:  const BranchSite[:],
 ) {
     for fi in functions.len {
         let cc = functions[fi].cyclomatic_cc as f64;

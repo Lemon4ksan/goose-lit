@@ -162,11 +162,11 @@ fn run_goose_differential_bce(target_path: const u8[:], out_o0: u8[>..]&, out_o2
 
 // Parses one bce-line record: "bce-line: <file>:<line>: <elided> elided, <kept> kept"
 fn parse_bce_line(
-    raw_line: const u8[:],
-    file_out: u8[>..]&,
+    raw_line:     const u8[:],
+    file_out:     u8[>..]&,
     line_num_out: i32&,
-    elided_out: i32&,
-    kept_out: i32&,
+    elided_out:   i32&,
+    kept_out:     i32&,
 ) -> bool {
     var t = trim_ascii(raw_line);
     if t.len >= 3 && t[0] == 0xEF && t[1] == 0xBB && t[2] == 0xBF {
@@ -177,7 +177,7 @@ fn parse_bce_line(
 
     // Format: <file>:<line>: <elided> elided, <kept> kept
     // Note on Windows: file may start with C: or d:
-    var first_colon: i64 = -1;
+    var first_colon:  i64 = -1;
     var second_colon: i64 = -1;
 
     for i in rest.len {
@@ -235,9 +235,9 @@ fn parse_bce_line(
 // Maps parsed `--bce-lines` records directly onto functions and branches.
 fn apply_bce_lines_blob(
     output_blob: const u8[:],
-    pool: const u8[:],
-    functions: FunctionInfo[>..]&,
-    branches: BranchSite[>..]&,
+    pool:        const u8[:],
+    functions:   FunctionInfo[>..]&,
+    branches:    BranchSite[>..]&,
 ) {
     var line_start: i64 = 0;
     let n = output_blob.len;
@@ -255,9 +255,9 @@ fn apply_bce_lines_blob(
         line_start = line_end + 1;
 
         var file_buf: u8[>..] = [];
-        var line_num: i32 = 0;
-        var elided: i32 = 0;
-        var kept: i32 = 0;
+        var line_num: i32     = 0;
+        var elided:   i32     = 0;
+        var kept:     i32     = 0;
 
         if parse_bce_line(raw_line, file_buf, line_num, elided, kept) {
             // Find matching function
@@ -271,7 +271,7 @@ fn apply_bce_lines_blob(
                         let f_first = functions[fi].first_branch;
                         let f_count = functions[fi].branch_count;
                         var matched_bid: i64 = -1;
-                        var best_depth: i32 = -1;
+                        var best_depth:  i32 = -1;
 
                         for bi in f_count {
                             let idx: i64 = f_first + bi;
@@ -311,22 +311,22 @@ fn apply_bce_lines_blob(
 struct BceRecord {
     file_off: i32 = 0,
     file_len: i32 = 0,
-    line: i32 = 0,
-    elided: i32 = 0,
-    kept: i32 = 0,
+    line:     i32 = 0,
+    elided:   i32 = 0,
+    kept:     i32 = 0,
 }
 
 // Applies differential BCE analysis, decoupling intrinsic -O0 bounds checks
 // from caller inlining multipliers observed under -O2.
 fn apply_differential_bce(
-    blob_o0: const u8[:],
-    blob_o2: const u8[:],
-    pool: const u8[:],
+    blob_o0:   const u8[:],
+    blob_o2:   const u8[:],
+    pool:      const u8[:],
     functions: FunctionInfo[>..]&,
-    branches: BranchSite[>..]&,
+    branches:  BranchSite[>..]&,
 ) {
     // 1. Ingest -O0 baseline records (representing intrinsic un-inlined checks)
-    var pool_o0: u8[>..] = [];
+    var pool_o0:    u8[>..]        = [];
     var records_o0: BceRecord[>..] = [];
 
     var l_start: i64 = 0;
@@ -339,18 +339,18 @@ fn apply_differential_bce(
         let raw_line = blob_o0[l_start..l_end];
         l_start = l_end + 1;
 
-        var f_buf: u8[>..] = [];
-        var l_num: i32 = 0;
-        var elided: i32 = 0;
-        var kept: i32 = 0;
+        var f_buf:  u8[>..] = [];
+        var l_num:  i32     = 0;
+        var elided: i32     = 0;
+        var kept:   i32     = 0;
         if parse_bce_line(raw_line, f_buf, l_num, elided, kept) {
             let fo, fl = pool_add(pool_o0, f_buf);
             records_o0.push(BceRecord {
                 file_off: fo,
                 file_len: fl,
-                line: l_num,
-                elided: elided,
-                kept: kept,
+                line:     l_num,
+                elided:   elided,
+                kept:     kept,
             });
         }
     }
@@ -368,9 +368,9 @@ fn apply_differential_bce(
         line_start = line_end + 1;
 
         var file_buf: u8[>..] = [];
-        var line_num: i32 = 0;
-        var elided: i32 = 0;
-        var kept: i32 = 0;
+        var line_num: i32     = 0;
+        var elided:   i32     = 0;
+        var kept:     i32     = 0;
 
         if parse_bce_line(raw_line, file_buf, line_num, elided, kept) {
             // Find corresponding record in -O0 baseline
@@ -384,7 +384,7 @@ fn apply_differential_bce(
             }
 
             var intrinsic_kept: i32 = kept;
-            var inlined_kept: i32 = 0;
+            var inlined_kept:   i32 = 0;
             if k0 >= 0 {
                 intrinsic_kept = if k0 > 0 && kept > k0 { k0 } else { kept };
                 inlined_kept = if kept > k0 { kept - k0 } else { 0 };
@@ -401,7 +401,7 @@ fn apply_differential_bce(
                         let f_first = functions[fi].first_branch;
                         let f_count = functions[fi].branch_count;
                         var matched_bid: i64 = -1;
-                        var best_depth: i32 = -1;
+                        var best_depth:  i32 = -1;
 
                         for bi in f_count {
                             let idx: i64 = f_first + bi;
@@ -443,14 +443,14 @@ fn apply_differential_bce(
 // Parses and maps `goose --specs --check` output records onto functions.
 fn apply_specs_blob(
     output_blob: const u8[:],
-    pool: const u8[:],
-    functions: FunctionInfo[>..]&,
+    pool:        const u8[:],
+    functions:   FunctionInfo[>..]&,
 ) {
     var line_start: i64 = 0;
     let n = output_blob.len;
 
     var cur_nodes: i32 = 0;
-    var cur_nest: i32 = 0;
+    var cur_nest:  i32 = 0;
     var cur_noinline = false;
     var pending_spec = false;
 

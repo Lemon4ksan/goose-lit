@@ -18,46 +18,46 @@ enum Verbosity {
 struct Failure {
     subtest: u8[..128] = [],
     summary: u8[..128] = [],
-    detail: u8[..512] = [],
+    detail:  u8[..512] = [],
 }
 
 struct T {
-    name: u8[..128] = [],
-    failed: bool = false,
-    aborted: bool = false,
-    skipped: bool = false,
-    assertions_count: i64 = 0,
-    failures_count: i64 = 0,
-    failures: Failure[..64] = [],
-    watch: Stopwatch = Stopwatch { start_ns: 0 },
-    level: i64 = 0,
+    name:             u8[..128]     = [],
+    failed:           bool          = false,
+    aborted:          bool          = false,
+    skipped:          bool          = false,
+    assertions_count: i64           = 0,
+    failures_count:   i64           = 0,
+    failures:         Failure[..64] = [],
+    watch:            Stopwatch     = Stopwatch { start_ns: 0 },
+    level:            i64           = 0,
 }
 
 struct Runner {
-    suite_name: u8[..128] = [],
-    total_tests: i64 = 0,
-    passed_tests: i64 = 0,
-    failed_tests: i64 = 0,
-    skipped_tests: i64 = 0,
-    total_assertions: i64 = 0,
-    total_failures: i64 = 0,
-    verbosity: Verbosity = Verbosity.Normal,
-    watch: Stopwatch = Stopwatch { start_ns: 0 },
+    suite_name:       u8[..128] = [],
+    total_tests:      i64       = 0,
+    passed_tests:     i64       = 0,
+    failed_tests:     i64       = 0,
+    skipped_tests:    i64       = 0,
+    total_assertions: i64       = 0,
+    total_failures:   i64       = 0,
+    verbosity:        Verbosity = Verbosity.Normal,
+    watch:            Stopwatch = Stopwatch { start_ns: 0 },
 }
 
 // Constructors
 
 fn new_runner(suite_name: const u8[:], verbosity: Verbosity = Verbosity.Normal) -> Runner {
     var r = Runner {
-        suite_name: [],
-        total_tests: 0,
-        passed_tests: 0,
-        failed_tests: 0,
-        skipped_tests: 0,
+        suite_name:       [],
+        total_tests:      0,
+        passed_tests:     0,
+        failed_tests:     0,
+        skipped_tests:    0,
         total_assertions: 0,
-        total_failures: 0,
-        verbosity: verbosity,
-        watch: stopwatch(),
+        total_failures:   0,
+        verbosity:        verbosity,
+        watch:            stopwatch(),
     };
     r.suite_name.append(suite_name);
     return r;
@@ -65,15 +65,15 @@ fn new_runner(suite_name: const u8[:], verbosity: Verbosity = Verbosity.Normal) 
 
 fn new_test(name: const u8[:], level: i64 = 0) -> T {
     var t = T {
-        name: [],
-        failed: false,
-        aborted: false,
-        skipped: false,
+        name:             [],
+        failed:           false,
+        aborted:          false,
+        skipped:          false,
         assertions_count: 0,
-        failures_count: 0,
-        failures: [Failure { .. }; 0],
-        watch: stopwatch(),
-        level: level,
+        failures_count:   0,
+        failures:         [Failure { .. }; 0],
+        watch:            stopwatch(),
+        level:            level,
     };
     t.name.append(name);
     return t;

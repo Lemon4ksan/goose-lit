@@ -12,29 +12,29 @@ import crap.lexer.scanner;
 import crap.ast.model;
 
 struct ProbePoint {
-    offset: i64 = 0,
+    offset:     i64 = 0,
     prefix_off: i32 = 0,
     prefix_len: i32 = 0,
-    id: i32 = -1,
+    id:         i32 = -1,
     suffix_off: i32 = 0,
     suffix_len: i32 = 0,
 }
 
 // Instruments a Goose source file, writing the rewritten source into `out_src`.
 fn instrument_goose_source(
-    src: const u8[:],
+    src:      const u8[:],
     branches: const BranchSite[:],
-    out_src: u8[>..]&,
-    file_id: i64,
+    out_src:  u8[>..]&,
+    file_id:  i64,
 ) {
     // 1. Locate insertion point for runtime extern declaration (after file header namespace & imports)
     // Per Goose reference §21 / spec §11.1, declarations (including extern fn) follow namespace and imports.
-    var tokens: Token[>..] = [];
+    var tokens:  Token[>..]      = [];
     var pragmas: LinePragma[>..] = [];
     tokenize_goose(src, tokens, pragmas);
 
     var extern_insert_pos: i64 = 0;
-    var ti: i64 = 0;
+    var ti:                i64 = 0;
     while ti < tokens.len {
         let tk = tokens[ti].kind;
         if tk == TOK_NAMESPACE || tk == TOK_IMPORT {
@@ -69,8 +69,8 @@ fn instrument_goose_source(
     out_src.append("(id: i32) = \"crap_cov_hit\";\n");
 
     // 2. Build list of probe injection points
-    var probe_pool: u8[>..] = [];
-    var points: ProbePoint[>..] = [];
+    var probe_pool: u8[>..]         = [];
+    var points:     ProbePoint[>..] = [];
 
     var pfx_std: u8[>..] = [];
     pfx_std.append(" ");
@@ -103,39 +103,39 @@ fn instrument_goose_source(
 
         if b.kind == BRANCH_IF_ELSE && b.needs_synth_else {
             points.push(ProbePoint {
-                offset: p_off,
+                offset:     p_off,
                 prefix_off: pfx_synth_off,
                 prefix_len: pfx_synth_len,
-                id: b.branch_id,
+                id:         b.branch_id,
                 suffix_off: sfx_synth_off,
                 suffix_len: sfx_synth_len,
             });
         } else if b.kind == BRANCH_MATCH_ARM && b.body_close_offset >= 0 {
             points.push(ProbePoint {
-                offset: p_off,
+                offset:     p_off,
                 prefix_off: pfx_arm_off,
                 prefix_len: pfx_arm_len,
-                id: b.branch_id,
+                id:         b.branch_id,
                 suffix_off: sfx_arm_off,
                 suffix_len: sfx_arm_len,
             });
             let c_off: i64 = b.body_close_offset;
             if c_off >= p_off && c_off <= src.len {
                 points.push(ProbePoint {
-                    offset: c_off,
+                    offset:     c_off,
                     prefix_off: pfx_close_off,
                     prefix_len: pfx_close_len,
-                    id: -1,
+                    id:         -1,
                     suffix_off: sfx_empty_off,
                     suffix_len: sfx_empty_len,
                 });
             }
         } else {
             points.push(ProbePoint {
-                offset: p_off,
+                offset:     p_off,
                 prefix_off: pfx_std_off,
                 prefix_len: pfx_std_len,
-                id: b.branch_id,
+                id:         b.branch_id,
                 suffix_off: sfx_std_off,
                 suffix_len: sfx_std_len,
             });

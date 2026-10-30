@@ -21,9 +21,9 @@ enum CheckKind {
 }
 
 struct CheckRule {
-    kind: CheckKind = CheckKind.Check,
-    line_no: i64 = 0,
-    count: i64 = 1,
+    kind:    CheckKind = CheckKind.Check,
+    line_no: i64       = 0,
+    count:   i64       = 1,
     pattern: u8[..512] = [],
 }
 
@@ -41,8 +41,8 @@ fn check_kind_name(k: CheckKind) -> const u8[:] {
 }
 
 struct FileCheckVar {
-    name: u8[..64] = [],
-    val: u8[..256] = [],
+    name: u8[..64]  = [],
+    val:  u8[..256] = [],
 }
 
 struct FileCheckContext {
@@ -117,10 +117,10 @@ enum SegKind {
 }
 
 struct PatternSeg {
-    kind: SegKind = SegKind.Lit,
-    text: u8[..128] = [],
-    spec: u8[..64] = [],
-    num_offset: i64 = 0,
+    kind:       SegKind   = SegKind.Lit,
+    text:       u8[..128] = [],
+    spec:       u8[..64]  = [],
+    num_offset: i64       = 0,
 }
 
 fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
@@ -416,9 +416,9 @@ fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckCont
 fn parse_check_directives(
     source: const u8[:],
     prefix: const u8[:],
-    rules: CheckRule[>..]&,
+    rules:  CheckRule[>..]&,
 ) -> bool {
-    var cursor: i64 = 0;
+    var cursor:   i64 = 0;
     var line_num: i64 = 1;
     let n = source.len;
     let p_len = prefix.len;
@@ -436,9 +436,9 @@ fn parse_check_directives(
             let comment_body = crap::trim_ascii(line[2..]);
             if crap::slice_starts_with(comment_body, prefix) {
                 let after_prefix = comment_body[p_len..];
-                var k: CheckKind = CheckKind.Check;
-                var pat_start: i64 = -1;
-                var count_val: i64 = 1;
+                var k:         CheckKind = CheckKind.Check;
+                var pat_start: i64       = -1;
+                var count_val: i64       = 1;
 
                 if crap::slice_starts_with(after_prefix, ":") {
                     k = CheckKind.Check;
@@ -477,9 +477,9 @@ fn parse_check_directives(
                 if pat_start >= 0 {
                     var pat = crap::trim_ascii(after_prefix[pat_start..]);
                     var rule = CheckRule {
-                        kind: k,
+                        kind:    k,
                         line_no: line_num,
-                        count: count_val,
+                        count:   count_val,
                         pattern: [],
                     };
                     for b in pat {
@@ -501,9 +501,9 @@ fn parse_check_directives(
 // Executes FileCheck verification over output stream using parsed rules.
 fn run_filecheck(
     output_stream: const u8[:],
-    test_source: const u8[:],
-    prefix: const u8[:],
-    out_diag: u8[>..]&,
+    test_source:   const u8[:],
+    prefix:        const u8[:],
+    out_diag:      u8[>..]&,
 ) -> bool {
     var rules: CheckRule[>..] = [];
     let pref = if prefix.len > 0 { prefix } else { "CHECK" };
@@ -517,7 +517,7 @@ fn run_filecheck(
     }
 
     var in_lines_start: i64[>..] = [];
-    var in_lines_end: i64[>..] = [];
+    var in_lines_end:   i64[>..] = [];
 
     var cur: i64 = 0;
     let n = output_stream.len;
@@ -535,9 +535,9 @@ fn run_filecheck(
         cur += 1;
     }
 
-    var in_idx: i64 = 0;
+    var in_idx:            i64 = 0;
     var last_matched_line: i64 = -1;
-    var last_matched_col: i64 = 0;
+    var last_matched_col:  i64 = 0;
     var ctx = FileCheckContext { .. };
 
     var r_idx: i64 = 0;

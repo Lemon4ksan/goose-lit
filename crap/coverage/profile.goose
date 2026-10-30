@@ -56,15 +56,15 @@ fn load_gcrap_profile(profile_path: const u8[:], branches: BranchSite[>..]&) -> 
 // Imports LCOV DA (line) and BRDA (branch) counts into branch coverage.
 fn load_lcov_profile(
     lcov_path: const u8[:],
-    pool: const u8[:],
+    pool:      const u8[:],
     functions: FunctionInfo[>..]&,
-    branches: BranchSite[>..]&,
+    branches:  BranchSite[>..]&,
 ) -> bool {
     var content: u8[>..] = [];
     guard read_file(lcov_path, content) else { return false; }
 
-    var cur_file: u8[>..] = [];
-    var line_start: i64 = 0;
+    var cur_file:   u8[>..] = [];
+    var line_start: i64     = 0;
     let n = content.len;
 
     while line_start < n {
@@ -147,9 +147,9 @@ fn load_lcov_profile(
 // Writes a standalone `.gcrap-cov` profile.
 fn save_gcrap_profile(
     profile_path: const u8[:],
-    pool: const u8[:],
-    functions: const FunctionInfo[:],
-    branches: const BranchSite[:],
+    pool:         const u8[:],
+    functions:    const FunctionInfo[:],
+    branches:     const BranchSite[:],
 ) -> bool {
     var out: u8[>..] = [];
     out.append("# goose-crap branch coverage profile v1\n");
@@ -167,17 +167,17 @@ fn save_gcrap_profile(
 
 // Aggregates branch coverage metrics and safety invariants onto each function.
 fn aggregate_coverage_metrics(
-    cfg: const RiskConfig&,
+    cfg:       const RiskConfig&,
     functions: FunctionInfo[>..]&,
-    branches: BranchSite[>..]&,
+    branches:  BranchSite[>..]&,
 ) {
     for fi in functions.len {
         let first = functions[fi].first_branch;
         let count = functions[fi].branch_count;
 
-        var covered_cnt: i32 = 0;
+        var covered_cnt:    i32 = 0;
         var uncov_bce_keep: i32 = 0;
-        var uncov_ovf: i32 = 0;
+        var uncov_ovf:      i32 = 0;
 
         for bi in count {
             let idx: i64 = first + bi;

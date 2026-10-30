@@ -71,18 +71,18 @@ fn run_crap_cli() -> i32 {
         return 1;
     }
 
-    var target_arg: const u8[:] = "";
-    var cover_test_files: u8[>..] = [];
-    var bce_file: const u8[:] = "";
+    var target_arg:       const u8[:] = "";
+    var cover_test_files: u8[>..]     = [];
+    var bce_file:         const u8[:] = "";
     var auto_bce = false;
     var specs_file: const u8[:] = "";
     var auto_specs = false;
-    var cov_files: u8[>..] = [];
-    var lcov_file: const u8[:] = "";
-    var out_file: const u8[:] = "";
-    var baseline_file: const u8[:] = "";
+    var cov_files:               u8[>..]     = [];
+    var lcov_file:               const u8[:] = "";
+    var out_file:                const u8[:] = "";
+    var baseline_file:           const u8[:] = "";
     var save_baseline_file_path: const u8[:] = "";
-    var format_mode: const u8[:] = "table";
+    var format_mode:             const u8[:] = "table";
 
     var cfg = default_risk_config();
     var delta_threshold: f64 = 5.0;
@@ -237,10 +237,10 @@ fn run_crap_cli() -> i32 {
         return 1;
     }
 
-    var pool: u8[>..] = [];
-    var functions: FunctionInfo[>..] = [];
-    var branches: BranchSite[>..] = [];
-    var call_sites: CallSite[>..] = [];
+    var pool:       u8[>..]           = [];
+    var functions:  FunctionInfo[>..] = [];
+    var branches:   BranchSite[>..]   = [];
+    var call_sites: CallSite[>..]     = [];
 
     // 1. Analyze AST for each file
     var line_start: i64 = 0;
@@ -362,8 +362,8 @@ fn run_crap_cli() -> i32 {
 
     // 11. Evaluate hardware complexity gate if requested
     if enforce_gate {
-        var gate_violations: i64 = 0;
-        var gate_report: u8[>..] = [];
+        var gate_violations: i64     = 0;
+        var gate_report:     u8[>..] = [];
         gate_report.append("\n=== Hardware Complexity Gate Evaluation ===\n");
         gate_report.append("Ceiling: G-CRAP <= ");
         append_f64_1(gate_report, gate_ceiling);

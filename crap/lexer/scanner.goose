@@ -8,95 +8,95 @@ namespace crap;
 import std;
 import core.bytes;
 
-let TOK_EOF: u8 = 0;
-let TOK_IDENT: u8 = 1;
+let TOK_EOF:    u8 = 0;
+let TOK_IDENT:  u8 = 1;
 let TOK_NUMBER: u8 = 2;
 let TOK_STRING: u8 = 3;
 
 // Keywords (Goose reference §1, Appendix A / spec §2)
-let TOK_FN: u8 = 10;
-let TOK_EXTERN: u8 = 11;
+let TOK_FN:        u8 = 10;
+let TOK_EXTERN:    u8 = 11;
 let TOK_NAMESPACE: u8 = 12;
-let TOK_STRUCT: u8 = 13;
-let TOK_ENUM: u8 = 14;
-let TOK_IF: u8 = 15;
-let TOK_ELSE: u8 = 16;
-let TOK_GUARD: u8 = 17;
-let TOK_WHILE: u8 = 18;
-let TOK_FOR: u8 = 19;
-let TOK_LOOP: u8 = 20;
-let TOK_MATCH: u8 = 21;
-let TOK_RETURN: u8 = 22;
-let TOK_BREAK: u8 = 23;
-let TOK_CONTINUE: u8 = 24;
-let TOK_AS: u8 = 25;
-let TOK_FROM: u8 = 26;
-let TOK_CONST: u8 = 27;
-let TOK_DEFER: u8 = 28;
-let TOK_BLOCK: u8 = 29;
-let TOK_IMPORT: u8 = 81;
+let TOK_STRUCT:    u8 = 13;
+let TOK_ENUM:      u8 = 14;
+let TOK_IF:        u8 = 15;
+let TOK_ELSE:      u8 = 16;
+let TOK_GUARD:     u8 = 17;
+let TOK_WHILE:     u8 = 18;
+let TOK_FOR:       u8 = 19;
+let TOK_LOOP:      u8 = 20;
+let TOK_MATCH:     u8 = 21;
+let TOK_RETURN:    u8 = 22;
+let TOK_BREAK:     u8 = 23;
+let TOK_CONTINUE:  u8 = 24;
+let TOK_AS:        u8 = 25;
+let TOK_FROM:      u8 = 26;
+let TOK_CONST:     u8 = 27;
+let TOK_DEFER:     u8 = 28;
+let TOK_BLOCK:     u8 = 29;
+let TOK_IMPORT:    u8 = 81;
 
 // Delimiters
-let TOK_LPAREN: u8 = 30;
-let TOK_RPAREN: u8 = 31;
-let TOK_LBRACKET: u8 = 32;
-let TOK_RBRACKET: u8 = 33;
-let TOK_LCURLY: u8 = 34;
-let TOK_RCURLY: u8 = 35;
-let TOK_SEMI: u8 = 36;
-let TOK_COMMA: u8 = 37;
-let TOK_COLON: u8 = 38;
+let TOK_LPAREN:     u8 = 30;
+let TOK_RPAREN:     u8 = 31;
+let TOK_LBRACKET:   u8 = 32;
+let TOK_RBRACKET:   u8 = 33;
+let TOK_LCURLY:     u8 = 34;
+let TOK_RCURLY:     u8 = 35;
+let TOK_SEMI:       u8 = 36;
+let TOK_COMMA:      u8 = 37;
+let TOK_COLON:      u8 = 38;
 let TOK_COLONCOLON: u8 = 39;
-let TOK_DOT: u8 = 40;
-let TOK_DOTDOT: u8 = 41;
-let TOK_ARROW: u8 = 42;
-let TOK_FATARROW: u8 = 43;
+let TOK_DOT:        u8 = 40;
+let TOK_DOTDOT:     u8 = 41;
+let TOK_ARROW:      u8 = 42;
+let TOK_FATARROW:   u8 = 43;
 
 // Logical & ternary
-let TOK_ANDAND: u8 = 50;
-let TOK_OROR: u8 = 51;
+let TOK_ANDAND:   u8 = 50;
+let TOK_OROR:     u8 = 51;
 let TOK_QUESTION: u8 = 52;
 
 // Arithmetic & shift operators (used for overflow risk detection)
-let TOK_PLUS: u8 = 60;
-let TOK_MINUS: u8 = 61;
-let TOK_MUL: u8 = 62;
-let TOK_SHL: u8 = 63;
-let TOK_PLUSEQ: u8 = 64;
+let TOK_PLUS:    u8 = 60;
+let TOK_MINUS:   u8 = 61;
+let TOK_MUL:     u8 = 62;
+let TOK_SHL:     u8 = 63;
+let TOK_PLUSEQ:  u8 = 64;
 let TOK_MINUSEQ: u8 = 65;
-let TOK_MULEQ: u8 = 66;
-let TOK_SHLEQ: u8 = 67;
-let TOK_INC: u8 = 68;
-let TOK_DEC: u8 = 69;
-let TOK_DIV: u8 = 74;
-let TOK_MOD: u8 = 75;
-let TOK_DIVEQ: u8 = 76;
-let TOK_MODEQ: u8 = 77;
+let TOK_MULEQ:   u8 = 66;
+let TOK_SHLEQ:   u8 = 67;
+let TOK_INC:     u8 = 68;
+let TOK_DEC:     u8 = 69;
+let TOK_DIV:     u8 = 74;
+let TOK_MOD:     u8 = 75;
+let TOK_DIVEQ:   u8 = 76;
+let TOK_MODEQ:   u8 = 77;
 
 // Other operators
-let TOK_LT: u8 = 70;
-let TOK_GT: u8 = 71;
+let TOK_LT:     u8 = 70;
+let TOK_GT:     u8 = 71;
 let TOK_ASSIGN: u8 = 72;
-let TOK_BANG: u8 = 73;
-let TOK_OTHER: u8 = 80;
+let TOK_BANG:   u8 = 73;
+let TOK_OTHER:  u8 = 80;
 
 // Inline comment pragma kinds
-let PRAGMA_BCE_KEEP: u8 = 1;
-let PRAGMA_BCE_ELIDE: u8 = 2;
-let PRAGMA_CRAP_UNTRUSTED: u8 = 3;
-let PRAGMA_CRAP_TRUSTED: u8 = 4;
-let PRAGMA_CRAP_IGNORE: u8 = 5;
+let PRAGMA_BCE_KEEP:            u8 = 1;
+let PRAGMA_BCE_ELIDE:           u8 = 2;
+let PRAGMA_CRAP_UNTRUSTED:      u8 = 3;
+let PRAGMA_CRAP_TRUSTED:        u8 = 4;
+let PRAGMA_CRAP_IGNORE:         u8 = 5;
 let PRAGMA_CRAP_TRUSTED_BOUNDS: u8 = 6;
 
 struct Token {
-    kind: u8 = 0,
-    line: i32 = 1,
+    kind:  u8  = 0,
+    line:  i32 = 1,
     start: i32 = 0,
-    len: i32 = 0,
+    len:   i32 = 0,
 }
 
 struct LinePragma {
-    kind: u8 = 0,
+    kind: u8  = 0,
     line: i32 = 1,
 }
 
@@ -217,10 +217,10 @@ fn tokenize_goose(src: const u8[:], tokens: Token[>..]&, pragmas: LinePragma[>..
                 }
             }
             tokens.push(Token {
-                kind: TOK_STRING,
-                line: start_line,
+                kind:  TOK_STRING,
+                line:  start_line,
                 start: start,
-                len: (i as i32) - start,
+                len:   (i as i32) - start,
             });
             continue;
         }
@@ -246,10 +246,10 @@ fn tokenize_goose(src: const u8[:], tokens: Token[>..]&, pragmas: LinePragma[>..
                 }
             }
             tokens.push(Token {
-                kind: TOK_STRING,
-                line: start_line,
+                kind:  TOK_STRING,
+                line:  start_line,
                 start: start,
-                len: (i as i32) - start,
+                len:   (i as i32) - start,
             });
             continue;
         }
@@ -263,10 +263,10 @@ fn tokenize_goose(src: const u8[:], tokens: Token[>..]&, pragmas: LinePragma[>..
             }
             let word = src[start..i];
             tokens.push(Token {
-                kind: classify_keyword(word),
-                line: line,
+                kind:  classify_keyword(word),
+                line:  line,
                 start: start as i32,
-                len: (i - start) as i32,
+                len:   (i - start) as i32,
             });
             continue;
         }
@@ -294,10 +294,10 @@ fn tokenize_goose(src: const u8[:], tokens: Token[>..]&, pragmas: LinePragma[>..
                 }
             }
             tokens.push(Token {
-                kind: TOK_NUMBER,
-                line: line,
+                kind:  TOK_NUMBER,
+                line:  line,
                 start: start as i32,
-                len: (i - start) as i32,
+                len:   (i - start) as i32,
             });
             continue;
         }

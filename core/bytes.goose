@@ -79,7 +79,7 @@ fn slice_contains(haystack: const u8[:], needle: const u8[:]) -> bool {
 
 fn trim_ascii(s: const u8[:]) -> const u8[:] {
     var start: i64 = 0;
-    var end: i64 = s.len;
+    var end:   i64 = s.len;
     while start < end && is_ascii_space(s[start]) {
         start++;
     }
@@ -180,7 +180,7 @@ fn parse_f64_slice(s: const u8[:]) -> f64, bool {
             idx++;
         }
         var exp_scale: f64 = 1.0;
-        var p: i64 = 0;
+        var p:         i64 = 0;
         while p < exp_val {
             exp_scale *= 10.0;
             p++;
@@ -394,7 +394,7 @@ fn short_display_path(path: const u8[:], out: u8[>..]&) {
     var norm: u8[>..] = [];
     normalize_path(path, norm);
     var slashes: i64 = 0;
-    var i: i64 = norm.len - 1;
+    var i:       i64 = norm.len - 1;
     while i >= 0 {
         if norm[i] == '/' {
             slashes++;

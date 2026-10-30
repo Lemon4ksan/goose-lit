@@ -15,8 +15,8 @@ import crap.ast.model;
 struct FileAnalysisState {
     cur_namespace_off: i32 = -1,
     cur_namespace_len: i32 = 0,
-    file_off: i32 = 0,
-    file_len: i32 = 0,
+    file_off:          i32 = 0,
+    file_len:          i32 = 0,
 }
 
 fn is_untrusted_path_or_ns(path: const u8[:], ns: const u8[:]) -> bool {
@@ -52,14 +52,14 @@ fn contains_delimited_name(list: const u8[:], name: const u8[:]) -> bool {
 // Parses and analyzes all functions and branch sites in a single .goose source file,
 // with interprocedural call site recording for trust taint propagation.
 fn analyze_goose_file_with_calls(
-    file_path: const u8[:],
-    src: const u8[:],
-    pool: u8[>..]&,
-    functions: FunctionInfo[>..]&,
-    branches: BranchSite[>..]&,
+    file_path:  const u8[:],
+    src:        const u8[:],
+    pool:       u8[>..]&,
+    functions:  FunctionInfo[>..]&,
+    branches:   BranchSite[>..]&,
     call_sites: CallSite[>..]&,
 ) {
-    var tokens: Token[>..] = [];
+    var tokens:  Token[>..]      = [];
     var pragmas: LinePragma[>..] = [];
     tokenize_goose(src, tokens, pragmas);
 
@@ -176,7 +176,7 @@ fn analyze_goose_file_with_calls(
             var is_generic = false;
             var takes_wire_slice = false;
             var body_open_offset: i32 = -1;
-            var sig_paren_nest: i32 = 0;
+            var sig_paren_nest:   i32 = 0;
             var sig_seen_params = false;
             var sig_in_return = false;
 
@@ -247,46 +247,46 @@ fn analyze_goose_file_with_calls(
             // Add default function entry branch
             let fn_entry_id = branches.len as i32;
             branches.push(BranchSite {
-                branch_id: fn_entry_id,
-                func_idx: fn_idx,
-                kind: BRANCH_FN_ENTRY,
-                classification: BRANCH_CLASS_DEFAULT,
-                parent_branch: -1,
-                depth: 1,
-                start_line: fn_start_line,
-                end_line: fn_start_line,
+                branch_id:         fn_entry_id,
+                func_idx:          fn_idx,
+                kind:              BRANCH_FN_ENTRY,
+                classification:    BRANCH_CLASS_DEFAULT,
+                parent_branch:     -1,
+                depth:             1,
+                start_line:        fn_start_line,
+                end_line:          fn_start_line,
                 probe_byte_offset: body_open_offset + 1,
                 body_close_offset: -1,
-                needs_synth_else: false,
-                bce_keep: 0,
-                bce_elide: 0,
-                ovf_ops: 0,
-                hits: 0,
-                covered: false,
+                needs_synth_else:  false,
+                bce_keep:          0,
+                bce_elide:         0,
+                ovf_ops:           0,
+                hits:              0,
+                covered:           false,
             });
 
             // Active branch stack and brace nesting stack
-            var b_stack: i32[64];
+            var b_stack:     i32[64];
             var brace_stack: i32[64];
-            var stack_top: i32 = 0;
+            var stack_top:   i32 = 0;
 
             b_stack[0] = fn_entry_id;
             brace_stack[0] = 1;
             stack_top = 1;
 
             // Walk function body tokens and compute CC & Cognitive Complexity
-            var cyclomatic: i32 = 1;
-            var cognitive: i32 = 0;
-            var block_nest: i32 = 0;
-            var max_depth: i32 = 0;
-            var match_count: i32 = 0;
-            var match_arms_count: i32 = 0;
-            var loops_count: i32 = 0;
-            var guards_count: i32 = 0;
-            var total_ovf: i32 = 0;
-            var bracket_nest: i32 = 0;
-            var paren_nest: i32 = 0;
-            var bounded_bufs: u8[>..] = [];
+            var cyclomatic:       i32     = 1;
+            var cognitive:        i32     = 0;
+            var block_nest:       i32     = 0;
+            var max_depth:        i32     = 0;
+            var match_count:      i32     = 0;
+            var match_arms_count: i32     = 0;
+            var loops_count:      i32     = 0;
+            var guards_count:     i32     = 0;
+            var total_ovf:        i32     = 0;
+            var bracket_nest:     i32     = 0;
+            var paren_nest:       i32     = 0;
+            var bounded_bufs:     u8[>..] = [];
 
             // Tracking boolean chain sequence
             var last_bool_op: u8 = 0;
@@ -350,22 +350,22 @@ fn analyze_goose_file_with_calls(
                                 let synth_id = branches.len as i32;
                                 let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                                 branches.push(BranchSite {
-                                    branch_id: synth_id,
-                                    func_idx: fn_idx,
-                                    kind: BRANCH_IF_ELSE,
-                                    classification: BRANCH_CLASS_IF_ELSE,
-                                    parent_branch: parent_b,
-                                    depth: block_nest,
-                                    start_line: bt.line,
-                                    end_line: bt.line,
+                                    branch_id:         synth_id,
+                                    func_idx:          fn_idx,
+                                    kind:              BRANCH_IF_ELSE,
+                                    classification:    BRANCH_CLASS_IF_ELSE,
+                                    parent_branch:     parent_b,
+                                    depth:             block_nest,
+                                    start_line:        bt.line,
+                                    end_line:          bt.line,
                                     probe_byte_offset: bt.start + 1,
                                     body_close_offset: bt.start + 1,
-                                    needs_synth_else: true,
-                                    bce_keep: 0,
-                                    bce_elide: 0,
-                                    ovf_ops: 0,
-                                    hits: 0,
-                                    covered: false,
+                                    needs_synth_else:  true,
+                                    bce_keep:          0,
+                                    bce_elide:         0,
+                                    ovf_ops:           0,
+                                    hits:              0,
+                                    covered:           false,
                                 });
                             }
                         } else if branches[closed_bid as i64].kind == BRANCH_GUARD_FAIL {
@@ -374,22 +374,22 @@ fn analyze_goose_file_with_calls(
                             let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                             let p_depth = if parent_b >= 0 { branches[parent_b as i64].depth + 1 } else { block_nest + 1 };
                             branches.push(BranchSite {
-                                branch_id: pass_id,
-                                func_idx: fn_idx,
-                                kind: BRANCH_GUARD_PASS,
-                                classification: BRANCH_CLASS_DEFAULT,
-                                parent_branch: parent_b,
-                                depth: p_depth,
-                                start_line: bt.line,
-                                end_line: bt.line,
+                                branch_id:         pass_id,
+                                func_idx:          fn_idx,
+                                kind:              BRANCH_GUARD_PASS,
+                                classification:    BRANCH_CLASS_DEFAULT,
+                                parent_branch:     parent_b,
+                                depth:             p_depth,
+                                start_line:        bt.line,
+                                end_line:          bt.line,
                                 probe_byte_offset: bt.start + 1,
                                 body_close_offset: bt.start + 1,
-                                needs_synth_else: false,
-                                bce_keep: 0,
-                                bce_elide: 0,
-                                ovf_ops: 0,
-                                hits: 0,
-                                covered: false,
+                                needs_synth_else:  false,
+                                bce_keep:          0,
+                                bce_elide:         0,
+                                ovf_ops:           0,
+                                hits:              0,
+                                covered:           false,
                             });
                             // Guard pass dominates the rest of the enclosing block scope
                             if stack_top < 64 {
@@ -406,22 +406,22 @@ fn analyze_goose_file_with_calls(
                                 exit_probe = tokens[tok_idx + 1].start + 1;
                             }
                             branches.push(BranchSite {
-                                branch_id: exit_id,
-                                func_idx: fn_idx,
-                                kind: BRANCH_LOOP_EXIT,
-                                classification: BRANCH_CLASS_DEFAULT,
-                                parent_branch: parent_b,
-                                depth: block_nest,
-                                start_line: bt.line,
-                                end_line: bt.line,
+                                branch_id:         exit_id,
+                                func_idx:          fn_idx,
+                                kind:              BRANCH_LOOP_EXIT,
+                                classification:    BRANCH_CLASS_DEFAULT,
+                                parent_branch:     parent_b,
+                                depth:             block_nest,
+                                start_line:        bt.line,
+                                end_line:          bt.line,
                                 probe_byte_offset: exit_probe,
                                 body_close_offset: exit_probe,
-                                needs_synth_else: false,
-                                bce_keep: 0,
-                                bce_elide: 0,
-                                ovf_ops: 0,
-                                hits: 0,
-                                covered: false,
+                                needs_synth_else:  false,
+                                bce_keep:          0,
+                                bce_elide:         0,
+                                ovf_ops:           0,
+                                hits:              0,
+                                covered:           false,
                             });
                         }
                     }
@@ -453,22 +453,22 @@ fn analyze_goose_file_with_calls(
                     let bid = branches.len as i32;
                     let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                     branches.push(BranchSite {
-                        branch_id: bid,
-                        func_idx: fn_idx,
-                        kind: BRANCH_IF_THEN,
-                        classification: BRANCH_CLASS_DEFAULT,
-                        parent_branch: parent_b,
-                        depth: block_nest + 1,
-                        start_line: bt.line,
-                        end_line: bt.line,
+                        branch_id:         bid,
+                        func_idx:          fn_idx,
+                        kind:              BRANCH_IF_THEN,
+                        classification:    BRANCH_CLASS_DEFAULT,
+                        parent_branch:     parent_b,
+                        depth:             block_nest + 1,
+                        start_line:        bt.line,
+                        end_line:          bt.line,
                         probe_byte_offset: probe_off,
                         body_close_offset: -1,
-                        needs_synth_else: false,
-                        bce_keep: 0,
-                        bce_elide: 0,
-                        ovf_ops: 0,
-                        hits: 0,
-                        covered: false,
+                        needs_synth_else:  false,
+                        bce_keep:          0,
+                        bce_elide:         0,
+                        ovf_ops:           0,
+                        hits:              0,
+                        covered:           false,
                     });
                     if stack_top < 64 {
                         b_stack[stack_top] = bid;
@@ -491,22 +491,22 @@ fn analyze_goose_file_with_calls(
                         let bid = branches.len as i32;
                         let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                         branches.push(BranchSite {
-                            branch_id: bid,
-                            func_idx: fn_idx,
-                            kind: BRANCH_GUARD_FAIL,
-                            classification: BRANCH_CLASS_GUARD_CHECK,
-                            parent_branch: parent_b,
-                            depth: block_nest + 1,
-                            start_line: bt.line,
-                            end_line: bt.line,
+                            branch_id:         bid,
+                            func_idx:          fn_idx,
+                            kind:              BRANCH_GUARD_FAIL,
+                            classification:    BRANCH_CLASS_GUARD_CHECK,
+                            parent_branch:     parent_b,
+                            depth:             block_nest + 1,
+                            start_line:        bt.line,
+                            end_line:          bt.line,
                             probe_byte_offset: probe_off,
                             body_close_offset: -1,
-                            needs_synth_else: false,
-                            bce_keep: 0,
-                            bce_elide: 0,
-                            ovf_ops: 0,
-                            hits: 0,
-                            covered: false,
+                            needs_synth_else:  false,
+                            bce_keep:          0,
+                            bce_elide:         0,
+                            ovf_ops:           0,
+                            hits:              0,
+                            covered:           false,
                         });
                         if stack_top < 64 {
                             b_stack[stack_top] = bid;
@@ -527,22 +527,22 @@ fn analyze_goose_file_with_calls(
                         let bid = branches.len as i32;
                         let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                         branches.push(BranchSite {
-                            branch_id: bid,
-                            func_idx: fn_idx,
-                            kind: BRANCH_IF_ELSE,
-                            classification: BRANCH_CLASS_IF_ELSE,
-                            parent_branch: parent_b,
-                            depth: block_nest + 1,
-                            start_line: bt.line,
-                            end_line: bt.line,
+                            branch_id:         bid,
+                            func_idx:          fn_idx,
+                            kind:              BRANCH_IF_ELSE,
+                            classification:    BRANCH_CLASS_IF_ELSE,
+                            parent_branch:     parent_b,
+                            depth:             block_nest + 1,
+                            start_line:        bt.line,
+                            end_line:          bt.line,
                             probe_byte_offset: probe_off,
                             body_close_offset: -1,
-                            needs_synth_else: false,
-                            bce_keep: 0,
-                            bce_elide: 0,
-                            ovf_ops: 0,
-                            hits: 0,
-                            covered: false,
+                            needs_synth_else:  false,
+                            bce_keep:          0,
+                            bce_elide:         0,
+                            ovf_ops:           0,
+                            hits:              0,
+                            covered:           false,
                         });
                         if stack_top < 64 {
                             b_stack[stack_top] = bid;
@@ -566,22 +566,22 @@ fn analyze_goose_file_with_calls(
                         let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                         let p_depth = if parent_b >= 0 { branches[parent_b as i64].depth + 1 } else { block_nest + 1 };
                         branches.push(BranchSite {
-                            branch_id: pass_id,
-                            func_idx: fn_idx,
-                            kind: BRANCH_GUARD_PASS,
-                            classification: BRANCH_CLASS_DEFAULT,
-                            parent_branch: parent_b,
-                            depth: p_depth,
-                            start_line: bt.line,
-                            end_line: bt.line,
+                            branch_id:         pass_id,
+                            func_idx:          fn_idx,
+                            kind:              BRANCH_GUARD_PASS,
+                            classification:    BRANCH_CLASS_DEFAULT,
+                            parent_branch:     parent_b,
+                            depth:             p_depth,
+                            start_line:        bt.line,
+                            end_line:          bt.line,
                             probe_byte_offset: bt.start + 1,
                             body_close_offset: bt.start + 1,
-                            needs_synth_else: false,
-                            bce_keep: 0,
-                            bce_elide: 0,
-                            ovf_ops: 0,
-                            hits: 0,
-                            covered: false,
+                            needs_synth_else:  false,
+                            bce_keep:          0,
+                            bce_elide:         0,
+                            ovf_ops:           0,
+                            hits:              0,
+                            covered:           false,
                         });
                         if stack_top < 64 {
                             b_stack[stack_top] = pass_id;
@@ -613,22 +613,22 @@ fn analyze_goose_file_with_calls(
                         let bid = branches.len as i32;
                         let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                         branches.push(BranchSite {
-                            branch_id: bid,
-                            func_idx: fn_idx,
-                            kind: BRANCH_LOOP_BODY,
-                            classification: BRANCH_CLASS_DEFAULT,
-                            parent_branch: parent_b,
-                            depth: block_nest + 1,
-                            start_line: bt.line,
-                            end_line: bt.line,
+                            branch_id:         bid,
+                            func_idx:          fn_idx,
+                            kind:              BRANCH_LOOP_BODY,
+                            classification:    BRANCH_CLASS_DEFAULT,
+                            parent_branch:     parent_b,
+                            depth:             block_nest + 1,
+                            start_line:        bt.line,
+                            end_line:          bt.line,
                             probe_byte_offset: probe_off,
                             body_close_offset: -1,
-                            needs_synth_else: false,
-                            bce_keep: 0,
-                            bce_elide: 0,
-                            ovf_ops: 0,
-                            hits: 0,
-                            covered: false,
+                            needs_synth_else:  false,
+                            bce_keep:          0,
+                            bce_elide:         0,
+                            ovf_ops:           0,
+                            hits:              0,
+                            covered:           false,
                         });
                         if stack_top < 64 {
                             b_stack[stack_top] = bid;
@@ -651,8 +651,8 @@ fn analyze_goose_file_with_calls(
                         match_arms_count++;
                         cyclomatic++;
                         let is_braced = (tok_idx + 1 < num_tokens && tokens[tok_idx + 1].kind == TOK_LCURLY);
-                        var arm_probe: i32 = bt.start + 2;
-                        var arm_close: i32 = -1;
+                        var arm_probe:    i32 = bt.start + 2;
+                        var arm_close:    i32 = -1;
                         var arm_end_line: i32 = bt.line;
 
                         if is_braced {
@@ -699,22 +699,22 @@ fn analyze_goose_file_with_calls(
                         let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
                         let p_depth = if parent_b >= 0 { branches[parent_b as i64].depth + 1 } else { block_nest + 1 };
                         branches.push(BranchSite {
-                            branch_id: bid,
-                            func_idx: fn_idx,
-                            kind: BRANCH_MATCH_ARM,
-                            classification: BRANCH_CLASS_SPEC_MATCH,
-                            parent_branch: parent_b,
-                            depth: p_depth,
-                            start_line: bt.line,
-                            end_line: if is_braced { bt.line } else { arm_end_line },
+                            branch_id:         bid,
+                            func_idx:          fn_idx,
+                            kind:              BRANCH_MATCH_ARM,
+                            classification:    BRANCH_CLASS_SPEC_MATCH,
+                            parent_branch:     parent_b,
+                            depth:             p_depth,
+                            start_line:        bt.line,
+                            end_line:          if is_braced { bt.line } else { arm_end_line },
                             probe_byte_offset: arm_probe,
                             body_close_offset: arm_close,
-                            needs_synth_else: false,
-                            bce_keep: 0,
-                            bce_elide: 0,
-                            ovf_ops: 0,
-                            hits: 0,
-                            covered: false,
+                            needs_synth_else:  false,
+                            bce_keep:          0,
+                            bce_elide:         0,
+                            ovf_ops:           0,
+                            hits:              0,
+                            covered:           false,
                         });
                         if stack_top < 64 {
                             b_stack[stack_top] = bid;
@@ -794,10 +794,10 @@ fn analyze_goose_file_with_calls(
                         let callee_slice = src[c_st..c_en];
                         let c_off, c_len = pool_add(pool, callee_slice);
                         call_sites.push(CallSite {
-                            caller_idx: fn_idx,
+                            caller_idx:      fn_idx,
                             callee_name_off: c_off,
                             callee_name_len: c_len,
-                            line: bt.line,
+                            line:            bt.line,
                         });
                     }
                 } else if bt.kind == TOK_LBRACKET {
@@ -875,54 +875,54 @@ fn analyze_goose_file_with_calls(
             }
 
             functions.push(FunctionInfo {
-                func_idx: fn_idx,
-                name_off: name_off,
-                name_len: name_len,
-                qual_off: qual_off,
-                qual_len: qual_len,
-                file_off: file_off,
-                file_len: file_len,
-                start_line: fn_start_line,
-                end_line: fn_end_line,
+                func_idx:         fn_idx,
+                name_off:         name_off,
+                name_len:         name_len,
+                qual_off:         qual_off,
+                qual_len:         qual_len,
+                file_off:         file_off,
+                file_len:         file_len,
+                start_line:       fn_start_line,
+                end_line:         fn_end_line,
                 body_open_offset: body_open_offset,
 
                 cyclomatic_cc: cyclomatic,
-                cognitive_cc: cognitive,
-                effective_cc: effective_cc,
-                max_depth: max_depth,
-                match_blocks: match_count,
-                match_arms: match_arms_count,
-                loops_count: loops_count,
-                guards_count: guards_count,
+                cognitive_cc:  cognitive,
+                effective_cc:  effective_cc,
+                max_depth:     max_depth,
+                match_blocks:  match_count,
+                match_arms:    match_arms_count,
+                loops_count:   loops_count,
+                guards_count:  guards_count,
 
-                first_branch: first_branch_idx,
-                branch_count: total_fn_branches,
+                first_branch:     first_branch_idx,
+                branch_count:     total_fn_branches,
                 covered_branches: 0,
-                cov_branch: 0.0,
+                cov_branch:       0.0,
 
-                total_bce_keep: 0,
-                total_bce_elide: 0,
+                total_bce_keep:     0,
+                total_bce_elide:    0,
                 uncovered_bce_keep: 0,
-                total_ovf_ops: total_ovf,
-                uncovered_ovf_ops: 0,
-                specs_count: 0,
-                max_spec_nodes: 0,
-                compiler_nest: 0,
-                has_noinline: false,
+                total_ovf_ops:      total_ovf,
+                uncovered_ovf_ops:  0,
+                specs_count:        0,
+                max_spec_nodes:     0,
+                compiler_nest:      0,
+                has_noinline:       false,
 
-                trust_class: trust_class,
-                taint_depth: if trust_class == TRUST_UNTRUSTED { 0 } else { -1 },
-                takes_wire_slice: takes_wire_slice,
-                is_generic: is_generic,
+                trust_class:            trust_class,
+                taint_depth:            if trust_class == TRUST_UNTRUSTED { 0 } else { -1 },
+                takes_wire_slice:       takes_wire_slice,
+                is_generic:             is_generic,
                 uninstantiated_generic: false,
-                ignored: is_ignored,
+                ignored:                is_ignored,
 
-                classic_crap: 0.0,
-                risk_struct: 0.0,
-                risk_safety: 0.0,
-                g_crap: 0.0,
+                classic_crap:  0.0,
+                risk_struct:   0.0,
+                risk_safety:   0.0,
+                g_crap:        0.0,
                 fuzz_priority: 0.0,
-                archetype: ARCHETYPE_LOW_PRIORITY,
+                archetype:     ARCHETYPE_LOW_PRIORITY,
             });
 
             continue;
@@ -935,10 +935,10 @@ fn analyze_goose_file_with_calls(
 // Backwards-compatible convenience wrapper without call site tracking.
 fn analyze_goose_file(
     file_path: const u8[:],
-    src: const u8[:],
-    pool: u8[>..]&,
+    src:       const u8[:],
+    pool:      u8[>..]&,
     functions: FunctionInfo[>..]&,
-    branches: BranchSite[>..]&,
+    branches:  BranchSite[>..]&,
 ) {
     var dummy_calls: CallSite[>..] = [];
     analyze_goose_file_with_calls(file_path, src, pool, functions, branches, dummy_calls);
@@ -947,8 +947,8 @@ fn analyze_goose_file(
 // Iterative BFS over the interprocedural call graph to propagate untrusted taint.
 fn propagate_trust_taint(
     functions: FunctionInfo[>..]&,
-    calls: const CallSite[:],
-    pool: const u8[:],
+    calls:     const CallSite[:],
+    pool:      const u8[:],
 ) {
     var queue: i32[>..] = [];
 

@@ -78,8 +78,8 @@ fn mutate_payload_once(buf: u8[>..]&, rng: u64&) {
 // The target function must accept const u8[:] and return true if safely processed/rejected.
 // Returns false immediately if target reports failure or crashes.
 fn fuzz_payload_stream<F: fn(const u8[:]) -> bool>(
-    seed: const u8[:],
-    runs: i64,
+    seed:     const u8[:],
+    runs:     i64,
     out_diag: u8[>..]&,
 ) -> bool {
     guard seed.len > 0 else {
@@ -87,7 +87,7 @@ fn fuzz_payload_stream<F: fn(const u8[:]) -> bool>(
         return false;
     }
 
-    var rng: u64 = 0x9E3779B97F4A7C15;
+    var rng:     u64     = 0x9E3779B97F4A7C15;
     var mut_buf: u8[>..] = [];
 
     var it: i64 = 0;

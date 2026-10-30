@@ -40,11 +40,11 @@ fn sort_functions_by_gcrap(functions: const FunctionInfo[:], order: i32[>..]&) {
 
 // Formats terminal summary table and diagnostic triage queues.
 fn render_terminal_report(
-    pool: const u8[:],
+    pool:      const u8[:],
     functions: const FunctionInfo[:],
-    branches: const BranchSite[:],
-    cfg: const RiskConfig&,
-    out: u8[>..]&,
+    branches:  const BranchSite[:],
+    cfg:       const RiskConfig&,
+    out:       u8[>..]&,
 ) {
     var order: i32[>..] = [];
     sort_functions_by_gcrap(functions, order);
@@ -53,8 +53,8 @@ fn render_terminal_report(
     out.append("| Function                         |   CC |  Cog |   Cov% | bce:keep |     CRAP |   G-CRAP | Archetype          |\n");
     out.append("|----------------------------------|------|------|--------|----------|----------|----------|--------------------|\n");
 
-    var false_positives: i32 = 0;
-    var panic_hazards: i32 = 0;
+    var false_positives:     i32 = 0;
+    var panic_hazards:       i32 = 0;
     var total_bce_uncovered: i32 = 0;
 
     for oi in order.len {
@@ -133,7 +133,7 @@ fn render_terminal_report(
     out.append(" unproven bce:keep in uncovered branches)\n");
 
     var uninst_generics: i32 = 0;
-    var noinline_count: i32 = 0;
+    var noinline_count:  i32 = 0;
     for oi in order.len {
         let fi: i64 = order[oi];
         if functions[fi].uninstantiated_generic { uninst_generics++; }
@@ -154,11 +154,11 @@ fn render_terminal_report(
 
 // Renders complete Markdown report suitable for CI artifacts or PR comments.
 fn render_markdown_report(
-    pool: const u8[:],
+    pool:      const u8[:],
     functions: const FunctionInfo[:],
-    branches: const BranchSite[:],
-    cfg: const RiskConfig&,
-    out: u8[>..]&,
+    branches:  const BranchSite[:],
+    cfg:       const RiskConfig&,
+    out:       u8[>..]&,
 ) {
     var order: i32[>..] = [];
     sort_functions_by_gcrap(functions, order);
@@ -248,10 +248,10 @@ fn render_markdown_report(
 
 // Renders JSON output for CI automation.
 fn render_json_report(
-    pool: const u8[:],
+    pool:      const u8[:],
     functions: const FunctionInfo[:],
-    branches: const BranchSite[:],
-    out: u8[>..]&,
+    branches:  const BranchSite[:],
+    out:       u8[>..]&,
 ) {
     out.append("{\n  \"functions\": [\n");
 
@@ -312,10 +312,10 @@ fn render_json_report(
 // Renders GCC-compatible diagnostic warnings (<file>:<line>:<col>: warning: [G-CRAP <score>] ...)
 // for IDE integration (VS Code, Zed problem matchers).
 fn render_gcc_diagnostics(
-    pool: const u8[:],
+    pool:      const u8[:],
     functions: const FunctionInfo[:],
-    branches: const BranchSite[:],
-    out: u8[>..]&,
+    branches:  const BranchSite[:],
+    out:       u8[>..]&,
 ) {
     for fi in functions.len {
         let fn_info = functions[fi];
@@ -361,10 +361,10 @@ fn render_gcc_diagnostics(
 
 // Renders valid SARIF 2.1.0 JSON format for GitHub Code Scanning and IDE SARIF viewers.
 fn render_sarif_report(
-    pool: const u8[:],
+    pool:      const u8[:],
     functions: const FunctionInfo[:],
-    branches: const BranchSite[:],
-    out: u8[>..]&,
+    branches:  const BranchSite[:],
+    out:       u8[>..]&,
 ) {
     out.append("{\n");
     out.append("  \"$schema\": \"https://json.schemastore.org/sarif-2.1.0.json\",\n");
