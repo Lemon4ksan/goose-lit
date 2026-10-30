@@ -11,7 +11,7 @@ import core.proc;
 import core.time;
 
 struct RunDirective {
-    line_no: i64 = 0,
+    line_no: i64       = 0,
     command: u8[..512] = [],
 }
 
@@ -24,24 +24,36 @@ enum TestStatus {
 }
 
 struct TestResult {
-    file_path: u8[..512] = [],
-    status: TestStatus = TestStatus.Pass,
-    passed: bool = true,
-    total_runs: i64 = 0,
-    failed_runs: i64 = 0,
-    duration_us: i64 = 0,
-    diag: u8[>..] = [],
+    file_path:   u8[..512]  = [],
+    status:      TestStatus = TestStatus.Pass,
+    passed:      bool       = true,
+    total_runs:  i64        = 0,
+    failed_runs: i64        = 0,
+    duration_us: i64        = 0,
+    diag:        u8[>..]    = [],
 }
 
 fn host_has_feature(feat: const u8[:]) -> bool {
     let f = crap::trim_ascii(feat);
+    let os_id = crap::native_host_os();
+    let arch_id = crap::native_host_arch();
+
     if f == "windows" || f == "win32" || f == "win64" {
-        return true;
+        return os_id == 1;
+    }
+    if f == "linux" {
+        return os_id == 2;
+    }
+    if f == "macos" || f == "darwin" {
+        return os_id == 3;
     }
     if f == "x86_64" || f == "amd64" || f == "x64" {
-        return true;
+        return arch_id == 1;
     }
-    if f == "gcc" || f == "goose" {
+    if f == "aarch64" || f == "arm64" {
+        return arch_id == 2;
+    }
+    if f == "gcc" || f == "clang" || f == "goose" {
         return true;
     }
     return false;
@@ -49,7 +61,7 @@ fn host_has_feature(feat: const u8[:]) -> bool {
 
 // Scans a source file for `// RUN: <command>` directives.
 fn parse_run_directives(source: const u8[:], directives: RunDirective[>..]&) -> bool {
-    var cursor: i64 = 0;
+    var cursor:   i64 = 0;
     var line_num: i64 = 1;
     let n = source.len;
 
@@ -92,23 +104,39 @@ fn parse_run_directives(source: const u8[:], directives: RunDirective[>..]&) -> 
 // %S -> directory containing file_path
 // %t -> temporary scratch file path
 fn substitute_lit_command(
-    raw_cmd: const u8[:],
+    raw_cmd:   const u8[:],
     file_path: const u8[:],
-    out_cmd: u8[>..]&,
+    out_cmd:   u8[>..]&,
 ) {
-    var dir_path: u8[>..] = [];
+    let os_id = crap::native_host_os();
+    var dir_path:    u8[>..] = [];
     var native_file: u8[>..] = [];
     for b in file_path {
-        if b == '/' {
+        if os_id == 1 && b == '/' {
             native_file.push('\\');
         } else {
             native_file.push(b);
         }
     }
 
-    let last_slash = crap::slice_last_index_of_byte(native_file[..], '\\');
-    if last_slash >= 0 {
-        dir_path.append(native_file[..last_slash]);
+    var last_sep: i64 = -1;
+    var idx:      i64 = native_file.len - 1;
+    while idx >= 0 {
+        if native_file[idx] == '\\' || native_file[idx] == '/' {
+            last_sep = idx;
+            break;
+        }
+        idx--;
+    }
+
+    if last_sep >= 0 {
+        if last_sep == 0 {
+            dir_path.push(native_file[0]);
+        } else if last_sep == 2 && native_file.len >= 3 && native_file[1] == ':' {
+            dir_path.append(native_file[..3]);
+        } else {
+            dir_path.append(native_file[..last_sep]);
+        }
     } else {
         dir_path.push('.');
     }
@@ -180,8 +208,8 @@ fn substitute_lit_command(
 // Executes all // RUN: directives in a single test file.
 fn run_single_lit_test(
     file_path: const u8[:],
-    verbose: bool,
-    res: TestResult&,
+    verbose:   bool,
+    res:       TestResult&,
 ) -> bool {
     res.file_path.clear();
     for b in file_path {
@@ -354,8 +382,8 @@ fn run_single_lit_test(
 
 // Discovers all test files under a directory tree using an iterative BFS queue.
 fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
-    var count: i64 = 0;
-    var norm: u8[>..] = [];
+    var count: i64     = 0;
+    var norm:  u8[>..] = [];
     crap::normalize_slashes(dir_path, norm);
     while norm.len > 1 && norm[norm.len - 1] == '/' {
         norm.pop();
