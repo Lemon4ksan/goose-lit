@@ -8,5 +8,5 @@ c_sources_linux = ["shim/proc.c"];
 c_sources_macos = ["shim/proc.c"];
 c_flags_cc = ["-mstackrealign"];
 c_flags_cc_windows = ["-mstackrealign", "-Wl,--stack,33554432"];
-c_flags_msvc = ["/std:c11"];
+c_flags_msvc = ["/std:c11", "/STACK:33554432"];
 exclude = ["scratch", "bin"];
