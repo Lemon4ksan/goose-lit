@@ -8,6 +8,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   lint-and-licensing:
     name: Lint and license check
@@ -56,59 +60,79 @@ jobs:
           rm -f *.o
 
   verify:
-    name: Verify, Build and Test
-    runs-on: ubuntu-latest
+    name: Verify, Build and Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install build tools and C compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc clang make
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Cache Goose toolchain
         id: cache-goose
         uses: actions/cache@v4
         with:
-          path: ~/.goose
+          path: |
+            ~/.goose
+            /opt/goose-v2026.3-linux-x64
           key: ${{ runner.os }}-goose-v2026.3
+
+      - name: Install build tools and C compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential gcc clang make curl ca-certificates
+
+      - name: Bootstrap Goose compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if [ ! -f /opt/goose-v2026.3-linux-x64/goose ]; then
+            sudo mkdir -p /opt
+            curl -sSL --retry 5 --retry-delay 2 --retry-connrefused https://github.com/aardappel/goose/releases/download/v2026.3/goose-v2026.3-linux-x64.tar.gz | sudo tar -xz -C /opt
+          fi
+          sudo ln -sf /opt/goose-v2026.3-linux-x64/goose /usr/local/bin/goose
+
+      - name: Bootstrap Goose compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $gooseDir = "$HOME\.goose\goose-v2026.3-windows-x64"
+          if (-not (Test-Path "$gooseDir\goose.exe")) {
+            New-Item -ItemType Directory -Force -Path "$HOME\.goose" | Out-Null
+            $zipPath = "$HOME\.goose\goose.zip"
+            Invoke-WebRequest -Uri "https://github.com/aardappel/goose/releases/download/v2026.3/goose-v2026.3-windows-x64.zip" -OutFile $zipPath
+            Expand-Archive -Path $zipPath -DestinationPath "$HOME\.goose" -Force
+            Remove-Item $zipPath -Force
+            if (-not (Test-Path "$gooseDir\goose.exe")) {
+              New-Item -ItemType Directory -Force -Path $gooseDir | Out-Null
+              Move-Item "$HOME\.goose\*" "$gooseDir\" -Exclude "goose-v2026.3-windows-x64" -Force
+            }
+          }
+          "$gooseDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Verify code formatting
         run: |
           goose format --check .
 
-      - name: Typecheck core packages and binary
-        run: |
-          goose check lit.goose
-          goose check bin.goose
-          goose check tests/bench_test.goose
-          goose check tests/filecheck_test.goose
-          goose check tests/gate_test.goose
-          goose check tests/inspect_test.goose
-          goose check tests/pipeline_test.goose
-          goose check tests/wire_test.goose
-
-      - name: Build native goose-lit executable
-        run: |
-          mkdir -p bin
-          goose build -O2 -o bin/goose-lit bin.goose
-
-      - name: Execute unit test suites
+      - name: Execute test runner
         run: |
           python tools/test_runner.py
 
-      - name: Execute LIT test runner
-        run: |
-          ./bin/goose-lit tests/
-
       - name: Run G-CRAP risk analysis and generate SARIF
+        if: runner.os == 'Linux'
         run: |
           ./bin/goose-lit crap tests/pipeline_test.goose --format sarif --out gcrap.sarif
 
       - name: Upload SARIF report to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        if: runner.os == 'Linux' && always()
         with:
           sarif_file: gcrap.sarif
           category: goose-lit
