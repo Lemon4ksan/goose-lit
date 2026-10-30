@@ -72,21 +72,28 @@ goose-lit/
 │   ├── cli.goose            # CLI argument parser for crap mode
 │   └── crap.goose           # Subsystem export facade
 ├── testkit/
+│   ├── assert.goose         # Unit assertions (assert_eq, assert_true, etc.)
+│   ├── diff.goose           # Unified line-diff engine for failures
+│   ├── mock.goose           # Function call recorders and mocks
+│   ├── runner.goose         # In-process test suite and case runners
 │   └── testkit.goose        # thread_spawn_contained helpers
 ├── core/
 │   ├── bytes.goose          # Slice operations and byte utilities
-│   ├── proc.goose           # Process execution and output capture
-│   ├── time.goose           # Monotonic timers
-│   └── test.goose           # Assertions and test state
+│   ├── config.goose         # Configuration loading and baseline path resolution
+│   ├── proc.goose           # Process execution, cached temp output capture
+│   └── time.goose           # Monotonic timers
 ├── shim/
 │   └── proc.c               # C11 subprocess runner and atomic counters
 ├── tests/
 │   ├── filecheck_test.goose # Unit tests for FileCheck directives
 │   ├── wire_test.goose      # Split-stream and mutator tests
 │   └── pipeline_test.goose  # Pipeline test with // RUN: goose %s | %FileCheck %s
+├── tools/
+│   ├── test_runner.py       # Cross-platform 4-step test runner
+│   └── licensing.py         # SPDX license header validator and applicator
 └── scripts/
-    ├── test_all.ps1         # Windows test runner script
-    └── test_all.sh          # Unix test runner script
+    ├── test_all.py          # Cross-platform test runner entry point
+    └── test_all.sh          # POSIX shell wrapper for test runner
 ```
 
 ## Subsystems

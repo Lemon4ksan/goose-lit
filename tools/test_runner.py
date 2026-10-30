@@ -79,7 +79,14 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> tuple[int, str, str]
 def main() -> int:
     parser = argparse.ArgumentParser(description="goose-lit test runner")
     parser.add_argument("--pattern", default="*", help="Filter test files by glob pattern")
-    parser.add_argument("--check-only", action="store_true", help="Only typecheck without executing")
+    parser.add_argument(
+        "--check-only",
+        "--check_only",
+        "-CheckOnly",
+        dest="check_only",
+        action="store_true",
+        help="Only typecheck without executing",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     args = parser.parse_args()
 
@@ -98,7 +105,7 @@ def main() -> int:
     print(cyan(bold("goose-lit test runner")))
 
     # 1. Typecheck library and CLI
-    print(f"\n{yellow('[1/3] Typechecking lit.goose and bin.goose...')}")
+    print(f"\n{yellow('[1/4] Typechecking lit.goose and bin.goose...')}")
     t0_check = time.perf_counter()
 
     for target in [lit_file, bin_file]:
@@ -127,7 +134,7 @@ def main() -> int:
         print(yellow(f"No tests matched pattern: {args.pattern}"))
         return 0
 
-    print(f"\n{yellow(f'[2/3] Checking {len(all_test_files)} test suites...')}")
+    print(f"\n{yellow(f'[2/4] Checking {len(all_test_files)} test suites...')}")
     t0_tests = time.perf_counter()
     for tf in all_test_files:
         code, out, err = run_command([goose, "check", str(tf)], cwd=root_dir)
@@ -147,7 +154,7 @@ def main() -> int:
         return 0
 
     # 3. Build and execute via goose-lit binary
-    print(f"\n{yellow('[3/3] Executing test suite via goose-lit...')}")
+    print(f"\n{yellow('[3/4] Executing test suite via goose-lit...')}")
     exe_name = "goose-lit.exe" if platform.system() == "Windows" else "goose-lit"
     bin_path = root_dir / "bin" / exe_name
 
@@ -175,6 +182,19 @@ def main() -> int:
 
     if code != 0:
         print(red("\nTest execution failed."))
+        return 1
+
+    # 4. Verifying G-CRAP integration
+    print(f"\n{yellow('[4/4] Verifying G-CRAP integration...')}")
+    crap_cmd = [str(bin_path), "crap", str(tests_dir / "pipeline_test.goose")]
+    code, out, err = run_command(crap_cmd, cwd=root_dir)
+    if out:
+        print(cyan(out.strip()))
+    if err:
+        print(red(err.strip()))
+
+    if code != 0:
+        print(red("\nG-CRAP verification failed."))
         return 1
 
     print(green("\nAll test suites passed successfully."))
