@@ -6,7 +6,7 @@ namespace crap;
 
 import std;
 import os;
-import core.bytes;
+import sys.bytes;
 import crap.ast.model;
 
 // Loads a `.gcrap-cov` profile and maps hits to branches by branch_id.

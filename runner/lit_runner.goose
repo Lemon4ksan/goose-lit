@@ -6,9 +6,9 @@ namespace lit;
 
 import std;
 import os;
-import core.bytes;
-import core.proc;
-import core.time;
+import sys.bytes;
+import sys.proc;
+import sys.time;
 
 struct RunDirective {
     line_no: i64       = 0,

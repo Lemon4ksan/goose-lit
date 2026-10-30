@@ -7,7 +7,7 @@ namespace crap;
 
 import std;
 import os;
-import core.bytes;
+import sys.bytes;
 import crap.ast.model;
 
 struct BaselineEntry {

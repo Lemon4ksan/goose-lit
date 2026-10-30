@@ -77,7 +77,7 @@ goose-lit/
 │   ├── mock.goose           # Function call recorders and mocks
 │   ├── runner.goose         # In-process test suite and case runners
 │   └── testkit.goose        # thread_spawn_contained helpers
-├── core/
+├── sys/
 │   ├── bytes.goose          # Slice operations and byte utilities
 │   ├── config.goose         # Configuration loading and baseline path resolution
 │   ├── proc.goose           # Process execution, cached temp output capture

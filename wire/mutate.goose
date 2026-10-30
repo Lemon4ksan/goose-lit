@@ -5,7 +5,7 @@
 namespace lit;
 
 import std;
-import core.bytes;
+import sys.bytes;
 
 // Fast deterministic 64-bit pseudo-random number generator
 fn xorshift64_step(state: u64&) -> u64 {

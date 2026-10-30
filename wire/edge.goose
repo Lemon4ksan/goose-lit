@@ -6,7 +6,7 @@
 namespace lit;
 
 import std;
-import core.bytes;
+import sys.bytes;
 
 const VIRTUAL_PAGE_SIZE: i64 = 65536;
 

@@ -5,7 +5,7 @@
 namespace lit;
 
 import std;
-import core.time;
+import sys.time;
 import testkit.context;
 
 fn run<F: fn(T&)>(test_context: T&, sub_name: const u8[:]) -> bool {

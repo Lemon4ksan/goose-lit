@@ -7,7 +7,7 @@
 namespace lit;
 
 import std;
-import core.bytes;
+import sys.bytes;
 
 enum CheckKind {
     Check,

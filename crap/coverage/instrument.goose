@@ -7,7 +7,7 @@
 namespace crap;
 
 import std;
-import core.bytes;
+import sys.bytes;
 import crap.lexer.scanner;
 import crap.ast.model;
 

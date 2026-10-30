@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Lemon4ksan
 
-// core/config.goose - Configuration loader for goose-lit and G-CRAP.
+// sys/config.goose - Configuration loader for goose-lit and G-CRAP.
 // Parses flat key-value .litconfig files and manages baseline discovery.
 namespace crap;
 
 import std;
 import os;
-import core.bytes;
+import sys.bytes;
 
 struct LitConfig {
     baseline_buf:      u8[..256] = [],

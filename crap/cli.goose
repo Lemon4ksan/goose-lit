@@ -6,8 +6,8 @@ namespace crap;
 
 import std;
 import os;
-import core.bytes;
-import core.proc;
+import sys.bytes;
+import sys.proc;
 import crap.ast.model;
 import crap.ast.analyzer;
 import crap.compiler.bridge;
@@ -16,7 +16,7 @@ import crap.coverage.profile;
 import crap.metrics.crap;
 import crap.report.formatter;
 import crap.report.ratchet;
-import core.config;
+import sys.config;
 
 fn print_crap_usage() {
     write_stdout("Usage: goose-lit crap <path|file.goose> [options]\n");

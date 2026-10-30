@@ -5,7 +5,7 @@
 namespace crap;
 
 import std;
-import core.bytes;
+import sys.bytes;
 import crap.ast.model;
 
 // Sorts function indices descending by G-CRAP score.

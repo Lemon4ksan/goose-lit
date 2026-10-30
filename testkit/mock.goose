@@ -5,7 +5,7 @@
 namespace lit;
 
 import std;
-import core.time;
+import sys.time;
 
 struct MockClock {
     now_us: i64 = 1700000000000000, // Deterministic epoch instant in microseconds

@@ -5,8 +5,8 @@
 namespace lit;
 
 import std;
-import core.time;
-import core.bytes;
+import sys.time;
+import sys.bytes;
 
 // Verifies that average execution time does not exceed the specified nanosecond budget.
 fn verify_latency_budget<F: fn()>(

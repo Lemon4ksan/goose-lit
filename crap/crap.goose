@@ -6,9 +6,9 @@ namespace crap;
 
 import std;
 
-import core.bytes;
-import core.proc;
-import core.config;
+import sys.bytes;
+import sys.proc;
+import sys.config;
 import crap.lexer.scanner;
 import crap.ast.model;
 import crap.ast.analyzer;

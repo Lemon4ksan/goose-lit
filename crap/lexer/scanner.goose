@@ -6,7 +6,7 @@
 namespace crap;
 
 import std;
-import core.bytes;
+import sys.bytes;
 
 let TOK_EOF:    u8 = 0;
 let TOK_IDENT:  u8 = 1;

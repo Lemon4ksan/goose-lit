@@ -6,7 +6,7 @@
 namespace lit;
 
 import std;
-import core.bytes;
+import sys.bytes;
 
 // Evaluates whether a contained worker exited cleanly without traps or aborts.
 // Returns true if clean, or false with the exact abort message in out_diag.

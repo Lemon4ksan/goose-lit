@@ -6,7 +6,7 @@ namespace crap;
 
 import std;
 import os;
-import core.bytes;
+import sys.bytes;
 
 extern fn native_exec_to_file(cmd: const u8[:], out_path: const u8[:]) -> i32 = "crap_exec_to_file";
 extern fn native_cov_hit(id: i32) = "crap_cov_hit";

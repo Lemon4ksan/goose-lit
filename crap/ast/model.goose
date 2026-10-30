@@ -5,7 +5,7 @@
 namespace crap;
 
 import std;
-import core.bytes;
+import sys.bytes;
 
 // Branch site kinds
 let BRANCH_FN_ENTRY:   u8 = 1;

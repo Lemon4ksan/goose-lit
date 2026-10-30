@@ -9,10 +9,10 @@ namespace lit;
 import std;
 
 // ---- core systems & test utilities -----------------------------------------
-import core.bytes;
-import core.proc;
-import core.time;
-import core.config;
+import sys.bytes;
+import sys.proc;
+import sys.time;
+import sys.config;
 
 // ---- filecheck verification engine ----------------------------------------
 import check.filecheck;

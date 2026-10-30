@@ -6,8 +6,8 @@ namespace crap;
 
 import std;
 import os;
-import core.bytes;
-import core.proc;
+import sys.bytes;
+import sys.proc;
 import crap.ast.model;
 
 // Identifies the primary .goose entry-point file when given a package directory.

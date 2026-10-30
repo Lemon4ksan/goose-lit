@@ -5,7 +5,7 @@
 namespace lit;
 
 import std;
-import core.bytes;
+import sys.bytes;
 
 // Formats a byte slice as a hex dump with offsets and ASCII representations.
 fn format_hexdump(buf: const u8[:], base_addr: i64, out: u8[>..]&) {

@@ -6,7 +6,7 @@ namespace lit;
 
 import std;
 import os;
-import core.time;
+import sys.time;
 
 enum Verbosity {
     Silent,   // Only print failed tests and summary
