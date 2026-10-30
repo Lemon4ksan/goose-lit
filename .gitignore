@@ -1,17 +1,29 @@
-# goose-crap build artifacts and test binaries
-/bin/
-*.exe
-*.o
-*.obj
+# Binaries for programs and plugins
+bin/
 *.tmp
-*.log
-*.gcrap-cov
-*.gcrap-cov.raw
-*.gcrap-baseline.json
-*.gcrap_bak
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.o
+*.sock
 
-# Agentic and scratch directories
+# Byte-compiled Python
+__pycache__/
+*.py[codz]
+*$py.class
+.ruff_cache/
+
+# Agentic stuff
 .gemini/
+.superpowers/
 scratch/
 vendor/
+.worktrees/
+
+# goose-crap build artifacts and test binaries
+*.gcrap-cov
+*.gcrap-cov.raw
+*.gcrap_bak
 .system_generated/
