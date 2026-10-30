@@ -126,10 +126,21 @@ GCRAP_WEAK int32_t crap_setenv(crap_bytes_ro key, crap_bytes_ro val) {
     crap_slice_to_cstr(key, ckey, sizeof(ckey));
     crap_slice_to_cstr(val, cval, sizeof(cval));
 #ifdef _WIN32
-    SetEnvironmentVariableA(ckey, cval);
-    _putenv_s(ckey, cval);
+    char abs_val[4096];
+    if (GetFullPathNameA(cval, sizeof(abs_val), abs_val, NULL) > 0) {
+        SetEnvironmentVariableA(ckey, abs_val);
+        _putenv_s(ckey, abs_val);
+    } else {
+        SetEnvironmentVariableA(ckey, cval);
+        _putenv_s(ckey, cval);
+    }
 #else
-    setenv(ckey, cval, 1);
+    char abs_val[4096];
+    if (realpath(cval, abs_val) != NULL) {
+        setenv(ckey, abs_val, 1);
+    } else {
+        setenv(ckey, cval, 1);
+    }
 #endif
     return 0;
 }
