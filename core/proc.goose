@@ -13,6 +13,9 @@ extern fn native_cov_hit(id: i32) = "crap_cov_hit";
 extern fn native_cov_reset() = "crap_cov_reset";
 extern fn native_cov_get(id: i32) -> i64 = "crap_cov_get";
 extern fn native_cov_dump(path: const u8[:]) -> i32 = "crap_cov_dump";
+extern fn native_host_os() -> i32 = "crap_host_os";
+extern fn native_host_arch() -> i32 = "crap_host_arch";
+extern fn native_cpu_count() -> i32 = "crap_cpu_count";
 
 // Runs an external command and captures its combined stdout/stderr into `out`.
 // Returns the process exit status.

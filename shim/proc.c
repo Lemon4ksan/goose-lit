@@ -194,3 +194,39 @@ GCRAP_WEAK int32_t crap_file_delete(crap_bytes_ro path) {
     return unlink(cpath);
 #endif
 }
+
+GCRAP_WEAK int32_t crap_host_os(void) {
+#if defined(_WIN32)
+    return 1;
+#elif defined(__APPLE__)
+    return 3;
+#elif defined(__linux__)
+    return 2;
+#else
+    return 0;
+#endif
+}
+
+GCRAP_WEAK int32_t crap_host_arch(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+    return 1;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return 2;
+#else
+    return 0;
+#endif
+}
+
+GCRAP_WEAK int32_t crap_cpu_count(void) {
+#if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return (int32_t)(si.dwNumberOfProcessors > 0 ? si.dwNumberOfProcessors : 1);
+#elif defined(__APPLE__) || defined(__linux__)
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return (int32_t)(n > 0 ? n : 1);
+#else
+    return 1;
+#endif
+}
+
