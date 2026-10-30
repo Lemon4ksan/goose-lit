@@ -9,6 +9,7 @@ import os;
 import sys.bytes;
 
 extern fn native_exec_to_file(cmd: const u8[:], out_path: const u8[:]) -> i32 = "crap_exec_to_file";
+extern fn native_setenv(key: const u8[:], val: const u8[:]) -> i32 = "crap_setenv";
 extern fn native_cov_hit(id: i32) = "crap_cov_hit";
 extern fn native_cov_reset() = "crap_cov_reset";
 extern fn native_cov_get(id: i32) -> i64 = "crap_cov_get";

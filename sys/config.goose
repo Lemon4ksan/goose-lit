@@ -13,6 +13,7 @@ struct LitConfig {
     baseline_buf:      u8[..256] = [],
     tests_dir_buf:     u8[..256] = [],
     src_dir_buf:       u8[..256] = [],
+    cc_buf:            u8[..256] = [],
     format_buf:        u8[..32]  = [],
     prefix_buf:        u8[..32]  = [],
     gate_ceiling:      f64       = 25.0,
@@ -40,6 +41,12 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
     if key == "src_dir" || key == "target" || key == "src" {
         cfg.src_dir_buf.clear();
         cfg.src_dir_buf.append(val);
+        return true;
+    }
+    if key == "goose_cc" || key == "cc" {
+        cfg.cc_buf.clear();
+        cfg.cc_buf.append(val);
+        native_setenv("GOOSE_CC", val);
         return true;
     }
     return false;
@@ -183,6 +190,13 @@ fn load_lit_config(custom_path: const u8[:], cfg: LitConfig&) -> bool {
     guard read_file(path_buf[..], content) else { return false; }
 
     parse_config_content(content[..], cfg);
+    if native_host_os() == 1 && cfg.cc_buf.len == 0 {
+        if file_exists("tools/gcc_noavx.cmd") {
+            native_setenv("GOOSE_CC", "tools/gcc_noavx.cmd");
+        } else if file_exists("tools/gcc_stack.bat") {
+            native_setenv("GOOSE_CC", "tools/gcc_stack.bat");
+        }
+    }
     cfg.loaded = true;
     return true;
 }

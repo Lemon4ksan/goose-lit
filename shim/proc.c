@@ -121,6 +121,19 @@ GCRAP_WEAK int32_t crap_cov_dump(crap_bytes_ro path) {
     return (int32_t)crap_write_hits_to_file(cpath);
 }
 
+GCRAP_WEAK int32_t crap_setenv(crap_bytes_ro key, crap_bytes_ro val) {
+    char ckey[512], cval[4096];
+    crap_slice_to_cstr(key, ckey, sizeof(ckey));
+    crap_slice_to_cstr(val, cval, sizeof(cval));
+#ifdef _WIN32
+    SetEnvironmentVariableA(ckey, cval);
+    _putenv_s(ckey, cval);
+#else
+    setenv(ckey, cval, 1);
+#endif
+    return 0;
+}
+
 // Executes a shell command line and captures combined stdout and stderr into out_path.
 // Returns process exit code (0 on success, non-zero on failure, -1 on spawn error).
 GCRAP_WEAK int32_t crap_exec_to_file(crap_bytes_ro cmd, crap_bytes_ro out_path) {
