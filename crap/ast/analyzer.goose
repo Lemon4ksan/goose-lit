@@ -33,21 +33,6 @@ fn is_untrusted_path_or_ns(path: const u8[:], ns: const u8[:]) -> bool {
     return false;
 }
 
-// Fast zero-allocation exact match for semicolon-delimited lists of identifiers
-// (e.g. ";buf;vec;" prevents false-positive substring matching).
-fn contains_delimited_name(list: const u8[:], name: const u8[:]) -> bool {
-    guard name.len > 0 && list.len > name.len else { return false; }
-    var start: i64 = 0;
-    for i in list.len {
-        if list[i] == ';' {
-            if i - start == name.len && list[start..i] == name {
-                return true;
-            }
-            start = i + 1;
-        }
-    }
-    return false;
-}
 
 // Parses and analyzes all functions and branch sites in a single .goose source file,
 // with interprocedural call site recording for trust taint propagation.
@@ -286,7 +271,6 @@ fn analyze_goose_file_with_calls(
             var total_ovf:        i32     = 0;
             var bracket_nest:     i32     = 0;
             var paren_nest:       i32     = 0;
-            var bounded_bufs:     u8[>..] = [];
 
             // Tracking boolean chain sequence
             var last_bool_op: u8 = 0;
@@ -762,26 +746,6 @@ fn analyze_goose_file_with_calls(
                 } else if (bt.kind == TOK_BREAK || bt.kind == TOK_CONTINUE) && block_nest > 2 {
                     cognitive += 1;
                 } else if bt.kind == TOK_IDENT {
-                    // Check if calling .push(...) or .append(...) on a bounded buffer (Goose ref §5 / spec §3.3)
-                    if tok_idx + 2 < num_tokens && tokens[tok_idx + 1].kind == TOK_DOT && tokens[tok_idx + 2].kind == TOK_IDENT {
-                        let m_st: i64 = tokens[tok_idx + 2].start;
-                        let m_en: i64 = tokens[tok_idx + 2].start + tokens[tok_idx + 2].len;
-                        let method_name = src[m_st..m_en];
-                        if method_name == "push" || method_name == "append" {
-                            let v_st: i64 = bt.start;
-                            let v_en: i64 = bt.start + bt.len;
-                            let var_name = src[v_st..v_en];
-                            if contains_delimited_name(bounded_bufs, var_name) {
-                                let b_weight: i32 = 3;
-                                total_ovf += b_weight;
-                                let active_bid = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
-                                if active_bid >= 0 && active_bid < branches.len {
-                                    branches[active_bid].ovf_ops += b_weight;
-                                }
-                            }
-                        }
-                    }
-
                     // Record function call site (skip nested `fn helper(...)` declarations)
                     if (tok_idx == 0 || tokens[tok_idx - 1].kind != TOK_FN) &&
                        tok_idx + 1 < num_tokens && tokens[tok_idx + 1].kind == TOK_LPAREN {
@@ -802,26 +766,6 @@ fn analyze_goose_file_with_calls(
                     }
                 } else if bt.kind == TOK_LBRACKET {
                     bracket_nest++;
-                    let is_bounded_cap = (tok_idx + 3 < num_tokens &&
-                        tokens[tok_idx + 1].kind == TOK_DOTDOT &&
-                        (tokens[tok_idx + 2].kind == TOK_NUMBER || tokens[tok_idx + 2].kind == TOK_IDENT) &&
-                        tokens[tok_idx + 3].kind == TOK_RBRACKET) ||
-                        (tok_idx + 2 < num_tokens &&
-                            tokens[tok_idx + 1].kind == TOK_DOTDOT &&
-                            tokens[tok_idx + 2].kind == TOK_RBRACKET);
-                    if is_bounded_cap {
-                        // Found [..N], [..CONST] bounded inline buffer or [..] dynamic limited array (Goose ref §5 / spec §3.3)
-                        if tok_idx >= 3 && tokens[tok_idx - 2].kind == TOK_COLON && tokens[tok_idx - 3].kind == TOK_IDENT {
-                            let vn_st: i64 = tokens[tok_idx - 3].start;
-                            let vn_en: i64 = tokens[tok_idx - 3].start + tokens[tok_idx - 3].len;
-                            let var_name = src[vn_st..vn_en];
-                            if bounded_bufs.len == 0 {
-                                bounded_bufs.push(';');
-                            }
-                            bounded_bufs.append(var_name);
-                            bounded_bufs.push(';');
-                        }
-                    }
                 } else if bt.kind == TOK_RBRACKET {
                     if bracket_nest > 0 {
                         bracket_nest--;
@@ -831,12 +775,19 @@ fn analyze_goose_file_with_calls(
                            bt.kind == TOK_MULEQ || bt.kind == TOK_SHLEQ || bt.kind == TOK_INC ||
                            bt.kind == TOK_DEC || bt.kind == TOK_DIV || bt.kind == TOK_MOD ||
                            bt.kind == TOK_DIVEQ || bt.kind == TOK_MODEQ {
-                    let is_div = (bt.kind == TOK_DIV || bt.kind == TOK_MOD || bt.kind == TOK_DIVEQ || bt.kind == TOK_MODEQ);
-                    let weight: i32 = if bracket_nest > 0 { 3 } else if is_div { 2 } else { 1 };
-                    total_ovf += weight;
-                    let active_bid = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
-                    if active_bid >= 0 && active_bid < branches.len {
-                        branches[active_bid].ovf_ops += weight;
+                    let prev_k = if tok_idx > 0 { tokens[tok_idx - 1].kind } else { TOK_EOF };
+                    let is_unary_op = (bt.kind == TOK_MINUS || bt.kind == TOK_PLUS) && (
+                        prev_k != TOK_IDENT && prev_k != TOK_NUMBER && prev_k != TOK_STRING &&
+                        prev_k != TOK_RPAREN && prev_k != TOK_RBRACKET && prev_k != TOK_RCURLY
+                    );
+                    if !is_unary_op {
+                        let is_div = (bt.kind == TOK_DIV || bt.kind == TOK_MOD || bt.kind == TOK_DIVEQ || bt.kind == TOK_MODEQ);
+                        let weight: i32 = if bracket_nest > 0 { 3 } else if is_div { 2 } else { 1 };
+                        total_ovf += weight;
+                        let active_bid = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
+                        if active_bid >= 0 && active_bid < branches.len {
+                            branches[active_bid].ovf_ops += weight;
+                        }
                     }
                 } else if bt.kind == TOK_AS && tok_idx + 1 < num_tokens && tokens[tok_idx + 1].kind == TOK_BANG {
                     // Truncating cast 'as!'
