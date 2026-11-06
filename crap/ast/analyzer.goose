@@ -33,7 +33,6 @@ fn is_untrusted_path_or_ns(path: const u8[:], ns: const u8[:]) -> bool {
     return false;
 }
 
-
 // Parses and analyzes all functions and branch sites in a single .goose source file,
 // with interprocedural call site recording for trust taint propagation.
 fn analyze_goose_file_with_calls(
@@ -50,8 +49,9 @@ fn analyze_goose_file_with_calls(
 
     let file_off, file_len = pool_add(pool, file_path);
 
-    var cur_ns_off: i32 = -1;
-    var cur_ns_len: i32 = 0;
+    var cur_ns_off: i32     = -1;
+    var cur_ns_len: i32     = 0;
+    var ns_name:    u8[>..] = [];
 
     var tok_idx: i64 = 0;
     let num_tokens = tokens.len;
@@ -62,7 +62,7 @@ fn analyze_goose_file_with_calls(
         // Track namespace declaration: namespace <name>;
         if t.kind == TOK_NAMESPACE && tok_idx + 1 < num_tokens {
             tok_idx++;
-            var ns_name: u8[>..] = [];
+            ns_name.clear();
             while tok_idx < num_tokens && tokens[tok_idx].kind != TOK_SEMI {
                 let nt = tokens[tok_idx];
                 if nt.kind == TOK_IDENT || nt.kind == TOK_DOT || nt.kind == TOK_COLONCOLON {
@@ -260,17 +260,17 @@ fn analyze_goose_file_with_calls(
             stack_top = 1;
 
             // Walk function body tokens and compute CC & Cognitive Complexity
-            var cyclomatic:       i32     = 1;
-            var cognitive:        i32     = 0;
-            var block_nest:       i32     = 0;
-            var max_depth:        i32     = 0;
-            var match_count:      i32     = 0;
-            var match_arms_count: i32     = 0;
-            var loops_count:      i32     = 0;
-            var guards_count:     i32     = 0;
-            var total_ovf:        i32     = 0;
-            var bracket_nest:     i32     = 0;
-            var paren_nest:       i32     = 0;
+            var cyclomatic:       i32 = 1;
+            var cognitive:        i32 = 0;
+            var block_nest:       i32 = 0;
+            var max_depth:        i32 = 0;
+            var match_count:      i32 = 0;
+            var match_arms_count: i32 = 0;
+            var loops_count:      i32 = 0;
+            var guards_count:     i32 = 0;
+            var total_ovf:        i32 = 0;
+            var bracket_nest:     i32 = 0;
+            var paren_nest:       i32 = 0;
 
             // Tracking boolean chain sequence
             var last_bool_op: u8 = 0;
@@ -298,7 +298,7 @@ fn analyze_goose_file_with_calls(
                             is_match_brace[block_nest] = true;
                             pending_match_brace = false;
                         } else if is_match_brace[block_nest - 1] && pending_const_for_brace {
-                            // Compile-time `const for` variant expansion inside a match body (Goose ref §16 / spec §6.5)
+                            // Compile-time `const for` variant expansion inside a match body
                             is_match_brace[block_nest] = true;
                             pending_const_for_brace = false;
                         } else {
@@ -356,7 +356,11 @@ fn analyze_goose_file_with_calls(
                             // Guard fail block finished; register the GUARD_PASS outcome
                             let pass_id = branches.len as i32;
                             let parent_b = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };
-                            let p_depth = if parent_b >= 0 { branches[parent_b as i64].depth + 1 } else { block_nest + 1 };
+                            let p_depth = if parent_b >= 0 {
+                                branches[parent_b as i64].depth + 1
+                            } else {
+                                block_nest + 1
+                            };
                             branches.push(BranchSite {
                                 branch_id:         pass_id,
                                 func_idx:          fn_idx,
@@ -749,7 +753,10 @@ fn analyze_goose_file_with_calls(
                     // Record function call site (skip nested `fn helper(...)` declarations)
                     if (tok_idx == 0 || tokens[tok_idx - 1].kind != TOK_FN) &&
                        tok_idx + 1 < num_tokens && tokens[tok_idx + 1].kind == TOK_LPAREN {
-                        let c_st: i64 = if tok_idx >= 2 && tokens[tok_idx - 1].kind == TOK_COLONCOLON && tokens[tok_idx - 2].kind == TOK_IDENT {
+                        let has_qual_prefix = tok_idx >= 2 &&
+                            tokens[tok_idx - 1].kind == TOK_COLONCOLON &&
+                            tokens[tok_idx - 2].kind == TOK_IDENT;
+                        let c_st: i64 = if has_qual_prefix {
                             tokens[tok_idx - 2].start
                         } else {
                             bt.start
@@ -781,7 +788,8 @@ fn analyze_goose_file_with_calls(
                         prev_k != TOK_RPAREN && prev_k != TOK_RBRACKET && prev_k != TOK_RCURLY
                     );
                     if !is_unary_op {
-                        let is_div = (bt.kind == TOK_DIV || bt.kind == TOK_MOD || bt.kind == TOK_DIVEQ || bt.kind == TOK_MODEQ);
+                        let is_div = bt.kind == TOK_DIV || bt.kind == TOK_MOD ||
+                            bt.kind == TOK_DIVEQ || bt.kind == TOK_MODEQ;
                         let weight: i32 = if bracket_nest > 0 { 3 } else if is_div { 2 } else { 1 };
                         total_ovf += weight;
                         let active_bid = if stack_top > 0 { b_stack[stack_top - 1] } else { -1 };

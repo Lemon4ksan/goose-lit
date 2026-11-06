@@ -9,6 +9,7 @@ import os;
 import sys.bytes;
 import sys.proc;
 import sys.time;
+import sys.config;
 
 struct RunDirective {
     line_no: i64       = 0,
@@ -21,6 +22,7 @@ enum TestStatus {
     XFail,
     XPass,
     Unsupported,
+    Timeout,
 }
 
 struct TestResult {
@@ -78,16 +80,12 @@ fn parse_run_directives(source: const u8[:], directives: RunDirective[>..]&) -> 
             let body = crap::trim_ascii(line[2..]);
             if crap::slice_starts_with(body, "RUN:") {
                 let cmd_part = crap::trim_ascii(body[4..]);
-                if cmd_part.len > 0 {
+                if cmd_part.len > 0 && cmd_part.len <= 512 {
                     var d = RunDirective {
                         line_no: line_num,
                         command: [],
                     };
-                    for b in cmd_part {
-                        if d.command.len < d.command.cap {
-                            d.command.push(b);
-                        }
-                    }
+                    d.command.append(cmd_part);
                     directives.push(d);
                 }
             }
@@ -250,17 +248,19 @@ fn is_test_candidate(path: const u8[:], name: const u8[:]) -> bool {
     if crap::slice_ends_with(name, "_test.goose") { return true; }
     if crap::slice_starts_with(name, "test_") && crap::slice_ends_with(name, ".goose") { return true; }
     if crap::slice_ends_with(name, ".goose") {
-        if crap::slice_contains(path, "/tests/") || crap::slice_contains(path, "\\tests\\") ||
-           crap::slice_contains(path, "/test/") || crap::slice_contains(path, "\\test\\") ||
-           crap::slice_starts_with(path, "tests/") || crap::slice_starts_with(path, "tests\\") ||
-           crap::slice_starts_with(path, "test/") || crap::slice_starts_with(path, "test\\") {
-            return true;
-        }
         var head: u8[>..] = [];
         if read_file(path, head) {
-            let max_scan = if head.len > 1024 { 1024 } else { head.len };
+            let max_scan = min(head.len, 1024);
             if crap::slice_contains(head[..max_scan], "// RUN:") {
                 return true;
+            }
+            if has_main_function(head[..]) {
+                if crap::slice_contains(path, "/tests/") || crap::slice_contains(path, "\\tests\\") ||
+                   crap::slice_contains(path, "/test/") || crap::slice_contains(path, "\\test\\") ||
+                   crap::slice_starts_with(path, "tests/") || crap::slice_starts_with(path, "tests\\") ||
+                   crap::slice_starts_with(path, "test/") || crap::slice_starts_with(path, "test\\") {
+                    return true;
+                }
             }
         }
     }
@@ -273,12 +273,18 @@ fn run_single_lit_test(
     verbose:   bool,
     res:       TestResult&,
 ) -> bool {
+    return run_single_lit_test_with_timeout(file_path, verbose, 0, res);
+}
+
+fn run_single_lit_test_with_timeout(
+    file_path:           const u8[:],
+    verbose:             bool,
+    default_timeout_sec: i64,
+    res:                 TestResult&,
+) -> bool {
     res.file_path.clear();
-    for b in file_path {
-        if res.file_path.len < res.file_path.cap {
-            res.file_path.push(b);
-        }
-    }
+    let copy_len = min(file_path.len, res.file_path.cap);
+    res.file_path.append(file_path[..copy_len]);
     res.passed = true;
     res.total_runs = 0;
     res.failed_runs = 0;
@@ -303,6 +309,7 @@ fn run_single_lit_test(
 
     var is_xfail = false;
     var is_unsupported = false;
+    var timeout_sec = default_timeout_sec;
 
     var cur: i64 = 0;
     let sn = src.len;
@@ -328,6 +335,12 @@ fn run_single_lit_test(
                 if unsupp.len > 0 && host_has_feature(unsupp) {
                     is_unsupported = true;
                 }
+            } else if crap::slice_starts_with(body, "TIMEOUT:") {
+                let t_str = crap::trim_ascii(body[8..]);
+                let t_val, ok = crap::parse_i64_slice(t_str);
+                if ok && t_val > 0 {
+                    timeout_sec = t_val;
+                }
             }
         }
     }
@@ -346,11 +359,8 @@ fn run_single_lit_test(
             command: [],
         };
         let def_cmd = default_run_command(file_path, src[..]);
-        for b in def_cmd {
-            if def_dir.command.len < def_dir.command.cap {
-                def_dir.command.push(b);
-            }
-        }
+        let def_len = min(def_cmd.len, def_dir.command.cap);
+        def_dir.command.append(def_cmd[..def_len]);
         directives.push(def_dir);
     }
 
@@ -368,10 +378,14 @@ fn run_single_lit_test(
     }
 
     let t0 = (monotonic_now().nanos as! i64) / 1000;
+    var timed_out = false;
+    let timeout_ms: i32 = if timeout_sec > 0 { (timeout_sec * 1000) as! i32 } else { 0 };
+    var cmd:     u8[>..] = [];
+    var run_out: u8[>..] = [];
 
     for d in directives {
         res.total_runs += 1;
-        var cmd: u8[>..] = [];
+        cmd.clear();
         substitute_lit_command(d.command[..], file_path, cmd);
 
         if verbose {
@@ -384,10 +398,26 @@ fn run_single_lit_test(
             write_stdout("\n");
         }
 
-        var run_out: u8[>..] = [];
-        let rc = crap::exec_capture(cmd[..], run_out);
+        run_out.clear();
+        let rc = crap::exec_capture_timeout(cmd[..], timeout_ms, run_out);
 
-        if rc != 0 {
+        if rc == 124 && timeout_ms > 0 {
+            timed_out = true;
+            res.passed = false;
+            res.failed_runs += 1;
+            res.diag.append("COMMAND TIMED OUT (> ");
+            var t_b: u8[..32] = [];
+            format(t_b, timeout_sec);
+            res.diag.append(t_b[..]);
+            res.diag.append("s) at line ");
+            var l_b: u8[..32] = [];
+            format(l_b, d.line_no);
+            res.diag.append(l_b[..]);
+            res.diag.append(":\n  $ ");
+            res.diag.append(cmd[..]);
+            res.diag.append("\n");
+            break;
+        } else if rc != 0 {
             res.passed = false;
             res.failed_runs += 1;
             res.diag.append("COMMAND FAILED (exit ");
@@ -419,6 +449,12 @@ fn run_single_lit_test(
         delete_file(tmp_exe[..]);
     }
 
+    if timed_out {
+        res.status = TestStatus.Timeout;
+        res.passed = false;
+        return false;
+    }
+
     let all_passed = (res.failed_runs == 0);
     if all_passed {
         if is_xfail {
@@ -444,6 +480,16 @@ fn run_single_lit_test(
 
 // Discovers all test files under a directory tree using an iterative BFS queue.
 fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
+    return discover_test_files_filtered(dir_path, "", out_paths);
+}
+
+// crap:trusted
+// crap:trusted-bounds
+fn discover_test_files_filtered(
+    dir_path:     const u8[:],
+    exclude_blob: const u8[:],
+    out_paths:    u8[>..]&,
+) -> i64 {
     var count: i64     = 0;
     var norm:  u8[>..] = [];
     crap::normalize_slashes(dir_path, norm);
@@ -452,7 +498,7 @@ fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
     }
 
     guard is_dir(norm[..]) else {
-        if file_exists(norm[..]) {
+        if file_exists(norm[..]) && !crap::is_excluded_path(norm[..], exclude_blob) {
             out_paths.append(norm[..]);
             out_paths.push('\n');
             return 1;
@@ -464,48 +510,43 @@ fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
     dir_queue.append(norm[..]);
     dir_queue.push('\n');
 
-    var queue_cursor: i64 = 0;
+    var entries:      u8[>..] = [];
+    var child:        u8[>..] = [];
+    var queue_cursor: i64     = 0;
     while queue_cursor < dir_queue.len {
-        var next_nl: i64 = -1;
-        for i in queue_cursor..dir_queue.len {
-            if dir_queue[i] == '\n' {
-                next_nl = i;
-                break;
-            }
-        }
-        guard next_nl >= 0 else { break; }
+        let rel_nl = crap::slice_index_of_byte(dir_queue[queue_cursor..], '\n');
+        guard rel_nl >= 0 else { break; }
+        let next_nl = queue_cursor + rel_nl;
 
         let cur_dir = dir_queue[queue_cursor..next_nl];
         queue_cursor = next_nl + 1;
 
-        var entries: u8[>..] = [];
-        if list_dir(cur_dir, entries) {
-            var line_start: i64 = 0;
-            for j in entries.len {
-                if entries[j] == '\n' {
-                    let name = crap::trim_ascii(entries[line_start..j]);
-                    line_start = j + 1;
+        entries.clear();
+        guard list_dir(cur_dir, entries) else { continue; }
+        var line_start: i64 = 0;
+        for j in entries.len {
+            guard entries[j] == '\n' else { continue; }
+            let name = crap::trim_ascii(entries[line_start..j]);
+            line_start = j + 1;
 
-                    guard name.len > 0 && name[0] != '.' &&
-                          name != "vendor" && name != "scratch" && name != "bin" &&
-                          name != "build" && name != "target" && name != "node_modules" else { continue; }
+            guard !crap::is_ignored_dir_entry(name) else { continue; }
 
-                    var child: u8[>..] = [];
-                    child.append(cur_dir);
-                    if !crap::slice_ends_with(cur_dir, "/") && !crap::slice_ends_with(cur_dir, "\\") {
-                        child.push('/');
-                    }
-                    child.append(name);
+            child.clear();
+            child.append(cur_dir);
+            if !crap::slice_ends_with(cur_dir, "/") && !crap::slice_ends_with(cur_dir, "\\") {
+                child.push('/');
+            }
+            child.append(name);
 
-                    if is_dir(child[..]) {
-                        dir_queue.append(child[..]);
-                        dir_queue.push('\n');
-                    } else if is_test_candidate(child[..], name) {
-                        out_paths.append(child[..]);
-                        out_paths.push('\n');
-                        count += 1;
-                    }
-                }
+            guard !crap::is_excluded_path(child[..], exclude_blob) else { continue; }
+
+            if is_dir(child[..]) {
+                dir_queue.append(child[..]);
+                dir_queue.push('\n');
+            } else if is_test_candidate(child[..], name) {
+                out_paths.append(child[..]);
+                out_paths.push('\n');
+                count += 1;
             }
         }
     }

@@ -29,13 +29,14 @@ fn save_baseline_file(
 ) -> bool {
     var out: u8[>..] = [];
     out.append("# goose-crap baseline v2\n");
+    var norm_file: u8[>..] = [];
 
     for fi in functions.len {
         let fn_info = functions[fi];
         let name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
         let file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
 
-        var norm_file: u8[>..] = [];
+        norm_file.clear();
         to_relative_path(file, root_path, norm_file);
 
         out.append(norm_file);
@@ -249,4 +250,69 @@ fn check_ratchet_gate(
     }
 
     return violations;
+}
+
+// Checks whether a single function is present in the baseline snapshot without regression.
+// crap:trusted
+// crap:trusted-bounds
+fn is_grandfathered_in_baseline(
+    baseline_path:   const u8[:],
+    pool:            const u8[:],
+    fn_info:         const FunctionInfo&,
+    delta_threshold: f64,
+) -> bool {
+    guard baseline_path.len > 0 else { return false; }
+    var content: u8[>..] = [];
+    guard read_file(baseline_path, content) else { return false; }
+
+    let is_v2 = slice_starts_with(content, "# goose-crap baseline v2");
+    let cur_name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
+    let cur_file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
+
+    var line_start: i64 = 0;
+    let n = content.len;
+    while line_start < n {
+        var line_end = n;
+        for i in line_start..n {
+            if content[i] == '\n' {
+                line_end = i;
+                break;
+            }
+        }
+        let raw = trim_ascii(content[line_start..line_end]);
+        line_start = line_end + 1;
+        if raw.len == 0 || raw[0] == '#' { continue; }
+
+        if is_v2 {
+            let sp1 = slice_index_of_byte(raw, ' ');
+            guard sp1 > 0 && sp1 < raw.len else { continue; }
+            let file_part = raw[..sp1];
+            let rest1 = trim_ascii(raw[sp1 + 1..]);
+            let sp2 = slice_index_of_byte(rest1, ' ');
+            guard sp2 > 0 && sp2 < rest1.len else { continue; }
+            let rest2 = trim_ascii(rest1[sp2 + 1..]);
+            let sp3 = slice_index_of_byte(rest2, ' ');
+            guard sp3 > 0 && sp3 < rest2.len else { continue; }
+            let name_part = rest2[..sp3];
+            let rest3 = trim_ascii(rest2[sp3 + 1..]);
+            let sp4 = slice_index_of_byte(rest3, ' ');
+            guard sp4 > 0 && sp4 < rest3.len else { continue; }
+            let gcrap_part = rest3[..sp4];
+            let rest4 = trim_ascii(rest3[sp4 + 1..]);
+            let sp5 = slice_index_of_byte(rest4, ' ');
+            let bce_part = if sp5 > 0 && sp5 <= rest4.len { rest4[..sp5] } else { rest4 };
+
+            if name_part == cur_name && paths_match(cur_file, file_part) {
+                let gcrap_val, ok_g = parse_f64_slice(gcrap_part);
+                let bce_val, ok_b = parse_i64_slice(bce_part);
+                if ok_g && ok_b {
+                    if fn_info.uncovered_bce_keep <= (bce_val as i32) &&
+                       (fn_info.g_crap <= gcrap_val + delta_threshold || fn_info.cov_branch >= 0.99) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    return false;
 }

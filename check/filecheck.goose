@@ -53,20 +53,18 @@ fn set_var(ctx: FileCheckContext&, name: const u8[:], val: const u8[:]) {
     for i in ctx.vars.len {
         if ctx.vars[i].name[..] == name {
             ctx.vars[i].val.clear();
-            for b in val {
-                if ctx.vars[i].val.len < ctx.vars[i].val.cap {
-                    ctx.vars[i].val.push(b);
-                }
-            }
+            let vlen = min(val.len, ctx.vars[i].val.cap);
+            ctx.vars[i].val.append(val[..vlen]);
             return;
         }
     }
-    if ctx.vars.len < ctx.vars.cap {
-        var v = FileCheckVar { .. };
-        for b in name { if v.name.len < v.name.cap { v.name.push(b); } }
-        for b in val { if v.val.len < v.val.cap { v.val.push(b); } }
-        ctx.vars.push(v);
-    }
+    guard ctx.vars.len < ctx.vars.cap else { return; }
+    var v = FileCheckVar { .. };
+    let nlen = min(name.len, v.name.cap);
+    v.name.append(name[..nlen]);
+    let vlen = min(val.len, v.val.cap);
+    v.val.append(val[..vlen]);
+    ctx.vars.push(v);
 }
 
 fn get_var(ctx: const FileCheckContext&, name: const u8[:]) -> const u8[:], bool {
@@ -123,6 +121,57 @@ struct PatternSeg {
     num_offset: i64       = 0,
 }
 
+inline fn push_seg(
+    out_segs:   PatternSeg[..32]&,
+    kind:       SegKind,
+    text:       const u8[:],
+    spec:       const u8[:],
+    num_offset: i64 = 0,
+) -> bool {
+    guard out_segs.len < out_segs.cap else { return false; }
+    var seg = PatternSeg { kind: kind, num_offset: num_offset, .. };
+    let tlen = min(text.len, seg.text.cap);
+    seg.text.append(text[..tlen]);
+    let slen = min(spec.len, seg.spec.cap);
+    seg.spec.append(spec[..slen]);
+    out_segs.push(seg);
+    return true;
+}
+
+fn parse_bracket_seg(body: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
+    if body.len > 0 && body[0] == '#' {
+        let num_body = crap::trim_ascii(body[1..]);
+        let colon_pos = crap::slice_index_of_byte(num_body, ':');
+        if colon_pos >= 0 {
+            let name = crap::trim_ascii(num_body[..colon_pos]);
+            var spec = crap::trim_ascii(num_body[colon_pos + 1..]);
+            if spec.len == 0 { spec = "[0-9]+"; }
+            return push_seg(out_segs, SegKind.NumDef, name, spec);
+        }
+        let plus_pos = crap::slice_index_of_byte(num_body, '+');
+        let minus_pos = crap::slice_index_of_byte(num_body, '-');
+        if plus_pos > 0 {
+            let name = crap::trim_ascii(num_body[..plus_pos]);
+            let off_val, _ = crap::parse_i64_slice(crap::trim_ascii(num_body[plus_pos + 1..]));
+            return push_seg(out_segs, SegKind.NumExpr, name, "", off_val);
+        }
+        if minus_pos > 0 {
+            let name = crap::trim_ascii(num_body[..minus_pos]);
+            let off_val, _ = crap::parse_i64_slice(crap::trim_ascii(num_body[minus_pos + 1..]));
+            return push_seg(out_segs, SegKind.NumExpr, name, "", -off_val);
+        }
+        if num_body.len == 0 {
+            return push_seg(out_segs, SegKind.Wildcard, "", "[0-9]+");
+        }
+        return push_seg(out_segs, SegKind.NumExpr, num_body, "", 0);
+    }
+    let colon_pos = crap::slice_index_of_byte(body, ':');
+    if colon_pos >= 0 {
+        return push_seg(out_segs, SegKind.VarDef, body[..colon_pos], body[colon_pos + 1..]);
+    }
+    return push_seg(out_segs, SegKind.VarUse, body, "");
+}
+
 fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
     out_segs.clear();
     var cur: i64 = 0;
@@ -146,24 +195,14 @@ fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
         }
 
         if next_tok < 0 {
-            var seg = PatternSeg { kind: SegKind.Lit, .. };
-            for b in rem {
-                if seg.text.len < seg.text.cap { seg.text.push(b); }
-            }
-            if seg.text.len > 0 && out_segs.len < out_segs.cap {
-                out_segs.push(seg);
+            if rem.len > 0 {
+                guard push_seg(out_segs, SegKind.Lit, rem, "") else { return false; }
             }
             break;
         }
 
         if next_tok > 0 {
-            var lit_seg = PatternSeg { kind: SegKind.Lit, .. };
-            for b in rem[..next_tok] {
-                if lit_seg.text.len < lit_seg.text.cap { lit_seg.text.push(b); }
-            }
-            if out_segs.len < out_segs.cap {
-                out_segs.push(lit_seg);
-            }
+            guard push_seg(out_segs, SegKind.Lit, rem[..next_tok], "") else { return false; }
             cur += next_tok;
         }
 
@@ -171,79 +210,13 @@ fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
             let after_open = pat[cur + 2..];
             let close_pos = crap::slice_index_of(after_open, "}}");
             guard close_pos >= 0 else { return false; }
-            let spec_str = after_open[..close_pos];
-            var seg = PatternSeg { kind: SegKind.Wildcard, .. };
-            for b in spec_str {
-                if seg.spec.len < seg.spec.cap { seg.spec.push(b); }
-            }
-            if out_segs.len < out_segs.cap {
-                out_segs.push(seg);
-            }
+            guard push_seg(out_segs, SegKind.Wildcard, "", after_open[..close_pos]) else { return false; }
             cur += 2 + close_pos + 2;
         } else {
             let after_open = pat[cur + 2..];
             let close_pos = crap::slice_index_of(after_open, "]]");
             guard close_pos >= 0 else { return false; }
-            let body = after_open[..close_pos];
-            if body.len > 0 && body[0] == '#' {
-                // Numeric FileCheck expression: [[#...]]
-                let num_body = crap::trim_ascii(body[1..]);
-                let colon_pos = crap::slice_index_of_byte(num_body, ':');
-                if colon_pos >= 0 {
-                    // Definition: [[#VAR:]] or [[#VAR:[0-9]+]]
-                    let name = crap::trim_ascii(num_body[..colon_pos]);
-                    var spec = crap::trim_ascii(num_body[colon_pos + 1..]);
-                    if spec.len == 0 { spec = "[0-9]+"; }
-                    var seg = PatternSeg { kind: SegKind.NumDef, .. };
-                    for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                    for b in spec { if seg.spec.len < seg.spec.cap { seg.spec.push(b); } }
-                    if out_segs.len < out_segs.cap { out_segs.push(seg); }
-                } else {
-                    // Expression or numeric reference
-                    let plus_pos = crap::slice_index_of_byte(num_body, '+');
-                    let minus_pos = crap::slice_index_of_byte(num_body, '-');
-                    if plus_pos > 0 {
-                        let name = crap::trim_ascii(num_body[..plus_pos]);
-                        let off_str = crap::trim_ascii(num_body[plus_pos + 1..]);
-                        let off_val, _ = crap::parse_i64_slice(off_str);
-                        var seg = PatternSeg { kind: SegKind.NumExpr, num_offset: off_val, .. };
-                        for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
-                    } else if minus_pos > 0 {
-                        let name = crap::trim_ascii(num_body[..minus_pos]);
-                        let off_str = crap::trim_ascii(num_body[minus_pos + 1..]);
-                        let off_val, _ = crap::parse_i64_slice(off_str);
-                        var seg = PatternSeg { kind: SegKind.NumExpr, num_offset: -off_val, .. };
-                        for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
-                    } else if num_body.len == 0 {
-                        // [[#]] -> unnamed numeric wildcard
-                        var seg = PatternSeg { kind: SegKind.Wildcard, .. };
-                        let spec = "[0-9]+";
-                        for b in spec { if seg.spec.len < seg.spec.cap { seg.spec.push(b); } }
-                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
-                    } else {
-                        // [[#VAR]] -> numeric reference with 0 offset
-                        var seg = PatternSeg { kind: SegKind.NumExpr, num_offset: 0, .. };
-                        for b in num_body { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                        if out_segs.len < out_segs.cap { out_segs.push(seg); }
-                    }
-                }
-            } else {
-                let colon_pos = crap::slice_index_of_byte(body, ':');
-                if colon_pos >= 0 {
-                    let name = body[..colon_pos];
-                    let spec = body[colon_pos + 1..];
-                    var seg = PatternSeg { kind: SegKind.VarDef, .. };
-                    for b in name { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                    for b in spec { if seg.spec.len < seg.spec.cap { seg.spec.push(b); } }
-                    if out_segs.len < out_segs.cap { out_segs.push(seg); }
-                } else {
-                    var seg = PatternSeg { kind: SegKind.VarUse, .. };
-                    for b in body { if seg.text.len < seg.text.cap { seg.text.push(b); } }
-                    if out_segs.len < out_segs.cap { out_segs.push(seg); }
-                }
-            }
+            guard parse_bracket_seg(after_open[..close_pos], out_segs) else { return false; }
             cur += 2 + close_pos + 2;
         }
     }
@@ -475,18 +448,15 @@ fn parse_check_directives(
                 }
 
                 if pat_start >= 0 {
-                    var pat = crap::trim_ascii(after_prefix[pat_start..]);
+                    let pat = crap::trim_ascii(after_prefix[pat_start..]);
                     var rule = CheckRule {
                         kind:    k,
                         line_no: line_num,
                         count:   count_val,
                         pattern: [],
                     };
-                    for b in pat {
-                        if rule.pattern.len < rule.pattern.cap {
-                            rule.pattern.push(b);
-                        }
-                    }
+                    let plen = min(pat.len, rule.pattern.cap);
+                    rule.pattern.append(pat[..plen]);
                     rules.push(rule);
                 }
             }

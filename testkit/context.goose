@@ -86,8 +86,8 @@ fn record_failure<B1, B2>(t: T&, summary: B1, detail: B2) {
     t.failures_count += 1;
     if t.failures.len < t.failures.cap {
         var entry = Failure { .. };
-        let name_slice = if t.name.len > entry.subtest.cap { t.name[..entry.subtest.cap] } else { t.name[..] };
-        entry.subtest.append(name_slice);
+        let name_len = min(t.name.len, entry.subtest.cap);
+        entry.subtest.append(t.name[..name_len]);
         format(entry.summary, summary);
         format(entry.detail, detail);
         t.failures.push(entry);
@@ -140,5 +140,16 @@ fn format<B>(out: B&, t: const T&) {
 }
 
 fn format<B>(out: B&, r: const Runner&) {
-    format(out, "Suite(", r.suite_name[..], ", passed=", r.passed_tests, "/", r.total_tests, ", failed=", r.failed_tests, ")");
+    format(
+        out,
+        "Suite(",
+        r.suite_name[..],
+        ", passed=",
+        r.passed_tests,
+        "/",
+        r.total_tests,
+        ", failed=",
+        r.failed_tests,
+        ")",
+    );
 }

@@ -19,10 +19,9 @@ fn run<F: fn(T&)>(test_context: T&, sub_name: const u8[:]) -> bool {
     if sub.failed {
         test_context.failed = true;
         test_context.failures_count += sub.failures_count;
-        for fail_idx in sub.failures.len {
-            if test_context.failures.len < test_context.failures.cap {
-                test_context.failures.push(sub.failures[fail_idx]);
-            }
+        let max_copy = min(sub.failures.len, test_context.failures.cap - test_context.failures.len);
+        for fail_idx in max_copy {
+            test_context.failures.push(sub.failures[fail_idx]);
         }
     }
     return !sub.failed;
@@ -49,10 +48,9 @@ fn run_table<Row, F: fn(T&, const Row&, i64)>(
             all_ok = false;
             test_context.failed = true;
             test_context.failures_count += sub.failures_count;
-            for fail_idx in sub.failures.len {
-                if test_context.failures.len < test_context.failures.cap {
-                    test_context.failures.push(sub.failures[fail_idx]);
-                }
+            let max_copy = min(sub.failures.len, test_context.failures.cap - test_context.failures.len);
+            for fail_idx in max_copy {
+                test_context.failures.push(sub.failures[fail_idx]);
             }
         }
     }
@@ -78,18 +76,35 @@ fn run_case<F: fn(T&)>(runner_ref: Runner&, case_name: const u8[:]) -> bool {
     if !test_context.failed {
         runner_ref.passed_tests += 1;
         if runner_ref.verbosity == Verbosity.Verbose {
-            print("  [PASS] ", test_context.name[..], " (", test_context.assertions_count, " checks in ", elapsed_duration.as_micros(), " us)");
+            print(
+                "  [PASS] ",
+                test_context.name[..],
+                " (",
+                test_context.assertions_count,
+                " checks in ",
+                elapsed_duration.as_micros(),
+                " us)",
+            );
         } else if runner_ref.verbosity == Verbosity.Golden {
             print("  [PASS] ", test_context.name[..], " (", test_context.assertions_count, " checks)");
         }
         return true;
     } else {
         runner_ref.failed_tests += 1;
-        print("  [FAIL] ", test_context.name[..], " (failed ", test_context.failures_count, " of ", test_context.assertions_count, " checks):");
+        print(
+            "  [FAIL] ",
+            test_context.name[..],
+            " (failed ",
+            test_context.failures_count,
+            " of ",
+            test_context.assertions_count,
+            " checks):",
+        );
         for fail_idx in test_context.failures.len {
-            print("    #", fail_idx + 1, " [", test_context.failures[fail_idx].subtest[..], "] ", test_context.failures[fail_idx].summary[..]);
-            if test_context.failures[fail_idx].detail.len > 0 {
-                print(test_context.failures[fail_idx].detail[..]);
+            let f_item = test_context.failures[fail_idx];
+            print("    #", fail_idx + 1, " [", f_item.subtest[..], "] ", f_item.summary[..]);
+            if f_item.detail.len > 0 {
+                print(f_item.detail[..]);
             }
         }
         return false;
@@ -101,12 +116,20 @@ fn finish(runner_ref: const Runner&) -> bool {
     if runner_ref.verbosity != Verbosity.Silent || runner_ref.failed_tests > 0 {
         print("----------------------------------------------------------------------------");
         if runner_ref.verbosity == Verbosity.Golden {
-            print("SUITE: ", runner_ref.suite_name[..], " | PASS: ", runner_ref.passed_tests, "/", runner_ref.total_tests,
-                  " | FAIL: ", runner_ref.failed_tests, " | CHECKS: ", runner_ref.total_assertions);
+            print(
+                "SUITE: ", runner_ref.suite_name[..],
+                " | PASS: ", runner_ref.passed_tests, "/", runner_ref.total_tests,
+                " | FAIL: ", runner_ref.failed_tests,
+                " | CHECKS: ", runner_ref.total_assertions,
+            );
         } else {
-            print("SUITE: ", runner_ref.suite_name[..], " | PASS: ", runner_ref.passed_tests, "/", runner_ref.total_tests,
-                  " | FAIL: ", runner_ref.failed_tests, " | CHECKS: ", runner_ref.total_assertions,
-                  " | TIME: ", total_duration.as_micros(), " us");
+            print(
+                "SUITE: ", runner_ref.suite_name[..],
+                " | PASS: ", runner_ref.passed_tests, "/", runner_ref.total_tests,
+                " | FAIL: ", runner_ref.failed_tests,
+                " | CHECKS: ", runner_ref.total_assertions,
+                " | TIME: ", total_duration.as_micros(), " us",
+            );
         }
         print("----------------------------------------------------------------------------");
     }

@@ -167,6 +167,7 @@ fn render_markdown_report(
     out.append("| Function | Location | CC | Cog | Branch Cov | Uncov bce:keep | Classic CRAP | G-CRAP | Archetype |\n");
     out.append("|---|---|---|---|---|---|---|---|---|\n");
 
+    var short_file: u8[>..] = [];
     for oi in order.len {
         let fi: i64 = order[oi];
         let fn_info = functions[fi];
@@ -178,7 +179,7 @@ fn render_markdown_report(
         out.append("| `");
         out.append(name);
         out.append("` | `");
-        var short_file: u8[>..] = [];
+        short_file.clear();
         short_display_path(file, short_file);
         out.append(short_file);
         out.push(':');
@@ -254,6 +255,7 @@ fn render_json_report(
     out:       u8[>..]&,
 ) {
     out.append("{\n  \"functions\": [\n");
+    var nfile: u8[>..] = [];
 
     for fi in functions.len {
         let fn_info = functions[fi];
@@ -264,7 +266,7 @@ fn render_json_report(
         out.append("      \"name\": \"");
         out.append(name);
         out.append("\",\n      \"file\": \"");
-        var nfile: u8[>..] = [];
+        nfile.clear();
         normalize_path(file, nfile);
         out.append(nfile);
         out.append("\",\n      \"line\": ");
@@ -317,6 +319,7 @@ fn render_gcc_diagnostics(
     branches:  const BranchSite[:],
     out:       u8[>..]&,
 ) {
+    var nfile: u8[>..] = [];
     for fi in functions.len {
         let fn_info = functions[fi];
         if fn_info.ignored { continue; }
@@ -324,7 +327,7 @@ fn render_gcc_diagnostics(
         let name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
         let file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
 
-        var nfile: u8[>..] = [];
+        nfile.clear();
         normalize_path(file, nfile);
 
         for bi in fn_info.branch_count {
@@ -401,13 +404,14 @@ fn render_sarif_report(
     out.append("      \"results\": [\n");
 
     var first_result = true;
+    var nfile: u8[>..] = [];
     for fi in functions.len {
         let fn_info = functions[fi];
         if fn_info.ignored { continue; }
 
         let name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
         let file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
-        var nfile: u8[>..] = [];
+        nfile.clear();
         normalize_path(file, nfile);
 
         for bi in fn_info.branch_count {

@@ -28,10 +28,7 @@
 #define GCRAP_WEAK
 #endif
 
-#pragma pack(push, 1)
 typedef struct { const uint8_t *data; int64_t len; } crap_bytes_ro;
-typedef struct { uint8_t *data; int64_t len; } crap_bytes_rw;
-#pragma pack(pop)
 
 #define GCRAP_MAX_BRANCHES 65536
 
@@ -202,6 +199,77 @@ GCRAP_WEAK int32_t crap_exec_to_file(crap_bytes_ro cmd, crap_bytes_ro out_path) 
         return (int32_t)WEXITSTATUS(status);
     }
     return (int32_t)status;
+#endif
+}
+
+GCRAP_WEAK int32_t crap_exec_to_file_timeout(crap_bytes_ro cmd, crap_bytes_ro out_path, int32_t timeout_ms) {
+    if (timeout_ms <= 0) {
+        return crap_exec_to_file(cmd, out_path);
+    }
+    char c_cmd[8192];
+    char c_out[4096];
+    crap_slice_to_cstr(cmd, c_cmd, sizeof(c_cmd));
+    crap_slice_to_cstr(out_path, c_out, sizeof(c_out));
+    if (!c_cmd[0] || !c_out[0]) return -1;
+
+#ifdef _WIN32
+    char full_cmd[8256];
+    if (c_cmd[0] == '"' || strchr(c_cmd, '|')) {
+        snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /S /C \"%s\"", c_cmd);
+    } else {
+        snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /C %s", c_cmd);
+    }
+    wchar_t w_cmd[8256];
+    wchar_t w_out[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, full_cmd, -1, w_cmd, 8256) <= 0) return -1;
+    if (MultiByteToWideChar(CP_UTF8, 0, c_out, -1, w_out, 4096) <= 0) return -1;
+
+    SECURITY_ATTRIBUTES sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hOut = CreateFileW(
+        w_out,
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &sa,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (hOut == INVALID_HANDLE_VALUE) return -1;
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = hOut;
+    si.hStdError = hOut;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    if (!CreateProcessW(NULL, w_cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        CloseHandle(hOut);
+        return -1;
+    }
+
+    DWORD wait_res = WaitForSingleObject(pi.hProcess, (DWORD)timeout_ms);
+    DWORD exit_code = 1;
+    if (wait_res == WAIT_TIMEOUT) {
+        TerminateProcess(pi.hProcess, 124);
+        WaitForSingleObject(pi.hProcess, 1000);
+        exit_code = 124;
+    } else {
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(hOut);
+    return (int32_t)exit_code;
+#else
+    return crap_exec_to_file(cmd, out_path);
 #endif
 }
 

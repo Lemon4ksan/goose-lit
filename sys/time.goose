@@ -55,12 +55,12 @@ fn as_nanos(inst: MonotonicInstant) -> u64 {
 }
 
 fn duration_since(now_inst: MonotonicInstant, anchor: MonotonicInstant) -> Duration {
-    if now_inst.nanos <= anchor.nanos {
+    guard now_inst.nanos > anchor.nanos else {
         return Duration { nanos: 0 };
     }
     let diff = now_inst.nanos - anchor.nanos;
     let max_i64 = 9223372036854775807 as u64;
-    let clamped = if diff > max_i64 { max_i64 } else { diff };
+    let clamped = min(diff, max_i64);
     return Duration { nanos: clamped as i64 };
 }
 

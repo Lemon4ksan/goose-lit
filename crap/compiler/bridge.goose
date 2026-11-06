@@ -80,17 +80,17 @@ fn resolve_package_entry_point(target_path: const u8[:], resolved_out: u8[>..]&)
     if list_dir(p, entries) {
         var line_start: i64 = 0;
         for j in entries.len {
-            if entries[j] == '\n' {
-                let name = entries[line_start..j];
-                line_start = j + 1;
-                if slice_ends_with(name, ".goose") && !slice_ends_with(name, "_test.goose") && !slice_starts_with(name, "test_") {
-                    var candidate: u8[>..] = [];
-                    candidate.append(p);
-                    candidate.push('/');
-                    candidate.append(name);
-                    resolved_out.append(candidate);
-                    return true;
-                }
+            guard entries[j] == '\n' else { continue; }
+            let name = entries[line_start..j];
+            line_start = j + 1;
+            let is_non_test_goose = slice_ends_with(name, ".goose") &&
+                !slice_ends_with(name, "_test.goose") &&
+                !slice_starts_with(name, "test_");
+            if is_non_test_goose {
+                resolved_out.append(p);
+                resolved_out.push('/');
+                resolved_out.append(name);
+                return true;
             }
         }
     }

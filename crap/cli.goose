@@ -33,6 +33,7 @@ fn print_crap_usage() {
     write_stdout("  --alpha <val>           Safety penalty weight for uncovered bce:keep (default 25.0)\n");
     write_stdout("  --beta <val>            Safety penalty weight for uncovered overflow ops (default 15.0)\n");
     write_stdout("  --threshold <val>       G-CRAP warning threshold (default 25.0)\n");
+    write_stdout("  --explain               Print branch-level line hotspot breakdown for G-CRAP and BCE\n");
     write_stdout("  --include-tests         Include test suites in analysis (excluded by default)\n\n");
     write_stdout("Reporting & CI Ratchet:\n");
     write_stdout("  --format <fmt>          Report format: table (default), md, json, gcc, sarif\n");
@@ -85,6 +86,8 @@ fn run_crap_cli() -> i32 {
     if lit_cfg.src_dir_buf.len > 0 {
         target_arg_buf.append(lit_cfg.src_dir_buf[..]);
     }
+    var target_paths_blob: u8[>..] = [];
+    var explain_mode = false;
     var cover_test_files: u8[>..]     = [];
     var bce_file:         const u8[:] = "";
     var auto_bce = false;
@@ -232,17 +235,22 @@ fn run_crap_cli() -> i32 {
             let val, ok = parse_f64_slice(all_args[i + 1]);
             if ok { cfg.gcrap_threshold = val; }
             i++;
+        } else if arg == "--explain" {
+            explain_mode = true;
         } else if arg == "--delta" && i + 1 < all_args.len {
             let val, ok = parse_f64_slice(all_args[i + 1]);
             if ok { delta_threshold = val; }
             i++;
         } else if !slice_starts_with(arg, "-") {
-            if target_arg_buf.len == 0 {
-                target_arg_buf.append(arg);
-            } else if enforce_gate {
-                let val, ok = parse_f64_slice(arg);
-                if ok {
-                    gate_ceiling = val;
+            let val, ok = parse_f64_slice(arg);
+            if enforce_gate && ok && target_paths_blob.len > 0 && !file_exists(arg) && !is_dir(arg) {
+                gate_ceiling = val;
+            } else {
+                target_paths_blob.append(arg);
+                target_paths_blob.push('\n');
+                if target_arg_buf.len == 0 {
+                    let copy_len = min(arg.len, target_arg_buf.cap);
+                    target_arg_buf.append(arg[..copy_len]);
                 }
             }
         }
@@ -280,7 +288,25 @@ fn run_crap_cli() -> i32 {
     }
 
     var files_blob: u8[>..] = [];
-    collect_goose_files(target_path, include_tests, files_blob);
+    if target_paths_blob.len > 0 {
+        var tp_start: i64 = 0;
+        while tp_start < target_paths_blob.len {
+            var tp_end = target_paths_blob.len;
+            for j in tp_start..target_paths_blob.len {
+                if target_paths_blob[j] == '\n' {
+                    tp_end = j;
+                    break;
+                }
+            }
+            let t_item = trim_ascii(target_paths_blob[tp_start..tp_end]);
+            tp_start = tp_end + 1;
+            if t_item.len > 0 {
+                collect_goose_files_filtered(t_item, include_tests, lit_cfg.exclude_buf[..], files_blob);
+            }
+        }
+    } else {
+        collect_goose_files_filtered(target_path, include_tests, lit_cfg.exclude_buf[..], files_blob);
+    }
 
     if files_blob.len == 0 {
         write_stderr("Error: No .goose files found under: ");
@@ -295,7 +321,8 @@ fn run_crap_cli() -> i32 {
     var call_sites: CallSite[>..]     = [];
 
     // 1. Analyze AST for each file
-    var line_start: i64 = 0;
+    var file_src:   u8[>..] = [];
+    var line_start: i64     = 0;
     while line_start < files_blob.len {
         var line_end = files_blob.len;
         for j in line_start..files_blob.len {
@@ -309,7 +336,7 @@ fn run_crap_cli() -> i32 {
         line_start = line_end + 1;
 
         if fpath.len > 0 {
-            var file_src: u8[>..] = [];
+            file_src.clear();
             if read_file(fpath, file_src) {
                 analyze_goose_file_with_calls(fpath, file_src, pool, functions, branches, call_sites);
             }
@@ -379,8 +406,8 @@ fn run_crap_cli() -> i32 {
         }
     }
 
-    // 9. Evaluate CI ratchet gate if requested
-    if baseline_file.len > 0 {
+    // 9. Evaluate CI ratchet gate if requested (in radar mode)
+    if baseline_file.len > 0 && !enforce_gate {
         var ratchet_report: u8[>..] = [];
         let violations = check_ratchet_gate(baseline_file, pool, functions, delta_threshold, ratchet_report);
         write_stdout(ratchet_report[..]);
@@ -412,7 +439,55 @@ fn run_crap_cli() -> i32 {
         write_stdout(report_buf[..]);
     }
 
-    // 11. Evaluate hardware complexity gate if requested
+    // 11. Branch-level hotspot explanation if requested
+    if explain_mode && !enforce_gate {
+        var explain_buf: u8[>..] = [];
+        explain_buf.append("\n=== G-CRAP Branch Hotspot Breakdown ===\n");
+        for fi in functions.len {
+            guard !functions[fi].ignored else { continue; }
+            if functions[fi].g_crap >= 5.0 || functions[fi].uncovered_bce_keep > 0 || functions[fi].total_ovf_ops > 0 {
+                let fn_name = pool_slice(pool, functions[fi].qual_off, functions[fi].qual_len);
+                let fn_file = pool_slice(pool, functions[fi].file_off, functions[fi].file_len);
+                explain_buf.append("  ");
+                explain_buf.append(fn_file);
+                explain_buf.push(':');
+                append_i64(explain_buf, functions[fi].start_line);
+                explain_buf.append(" ");
+                explain_buf.append(fn_name);
+                explain_buf.append(" (G-CRAP ");
+                append_f64_1(explain_buf, functions[fi].g_crap);
+                explain_buf.append(", EffCC ");
+                append_i64(explain_buf, functions[fi].effective_cc);
+                explain_buf.append("):\n");
+                let first = functions[fi].first_branch;
+                let count = functions[fi].branch_count;
+                for bi in count {
+                    let b_idx: i64 = first + bi;
+                    if b_idx < branches.len {
+                        let b = branches[b_idx];
+                        if !b.covered && (b.bce_keep > 0 || b.ovf_ops > 0) {
+                            explain_buf.append("    -> lines ");
+                            append_i64(explain_buf, b.start_line);
+                            explain_buf.append("..");
+                            append_i64(explain_buf, b.end_line);
+                            explain_buf.append(" (");
+                            explain_buf.append(branch_kind_name(b.kind));
+                            explain_buf.append(", depth ");
+                            append_i64(explain_buf, b.depth);
+                            explain_buf.append("): bce_keep=");
+                            append_i64(explain_buf, b.bce_keep);
+                            explain_buf.append(", ovf_ops=");
+                            append_i64(explain_buf, b.ovf_ops);
+                            explain_buf.append("\n");
+                        }
+                    }
+                }
+            }
+        }
+        write_stdout(explain_buf[..]);
+    }
+
+    // 12. Evaluate hardware complexity gate if requested
     if enforce_gate {
         var gate_violations: i64     = 0;
         var gate_report:     u8[>..] = [];
@@ -421,6 +496,7 @@ fn run_crap_cli() -> i32 {
         append_f64_1(gate_report, gate_ceiling);
         gate_report.append(", EffCC <= 15, unproven_bce == 0\n\n");
 
+        var reason: u8[>..] = [];
         for fi in functions.len {
             guard !functions[fi].ignored else { continue; }
             let g_val = functions[fi].g_crap;
@@ -429,7 +505,7 @@ fn run_crap_cli() -> i32 {
             let unproven = functions[fi].uncovered_bce_keep;
 
             var violated = false;
-            var reason: u8[>..] = [];
+            reason.clear();
 
             if g_val > gate_ceiling {
                 violated = true;
@@ -454,15 +530,54 @@ fn run_crap_cli() -> i32 {
             }
 
             if violated {
-                gate_violations += 1;
-                gate_report.append("  [REJECT] ");
                 let fn_name = pool_slice(pool, functions[fi].qual_off, functions[fi].qual_len);
-                gate_report.append(fn_name);
-                gate_report.append(" (line ");
-                append_i64(gate_report, functions[fi].start_line);
-                gate_report.append("): ");
-                gate_report.append(reason[..]);
-                gate_report.append("\n");
+                let fn_file = pool_slice(pool, functions[fi].file_off, functions[fi].file_len);
+                let is_base_ok = baseline_file.len > 0 &&
+                    is_grandfathered_in_baseline(baseline_file, pool, functions[fi], delta_threshold);
+                if is_base_ok {
+                    gate_report.append("  [BASELINE OK] ");
+                    gate_report.append(fn_name);
+                    gate_report.append(" (");
+                    gate_report.append(fn_file);
+                    gate_report.push(':');
+                    append_i64(gate_report, functions[fi].start_line);
+                    gate_report.append("): grandfathered within baseline delta\n");
+                } else {
+                    gate_violations += 1;
+                    gate_report.append("  [REJECT] ");
+                    gate_report.append(fn_name);
+                    gate_report.append(" (");
+                    gate_report.append(fn_file);
+                    gate_report.push(':');
+                    append_i64(gate_report, functions[fi].start_line);
+                    gate_report.append("): ");
+                    gate_report.append(reason[..]);
+                    gate_report.append("\n");
+
+                    let first = functions[fi].first_branch;
+                    let count = functions[fi].branch_count;
+                    for bi in count {
+                        let b_idx: i64 = first + bi;
+                        if b_idx < branches.len {
+                            let b = branches[b_idx];
+                            if !b.covered && (b.bce_keep > 0 || b.ovf_ops > 0) {
+                                gate_report.append("    -> lines ");
+                                append_i64(gate_report, b.start_line);
+                                gate_report.append("..");
+                                append_i64(gate_report, b.end_line);
+                                gate_report.append(" (");
+                                gate_report.append(branch_kind_name(b.kind));
+                                gate_report.append(", depth ");
+                                append_i64(gate_report, b.depth);
+                                gate_report.append("): bce_keep=");
+                                append_i64(gate_report, b.bce_keep);
+                                gate_report.append(", ovf_ops=");
+                                append_i64(gate_report, b.ovf_ops);
+                                gate_report.append("\n");
+                            }
+                        }
+                    }
+                }
             }
         }
 

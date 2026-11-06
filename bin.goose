@@ -26,6 +26,7 @@ fn print_usage() {
     write_stdout("  --config <file>        Load custom configuration file (default: .litconfig)\n");
     write_stdout("  --prefix <PREF>        FileCheck match prefix (default: CHECK)\n");
     write_stdout("  --verbose, -v          Verbose output of commands and matching\n");
+    write_stdout("  --timeout <sec>        Per-command timeout in seconds (default: 60)\n");
     write_stdout("  --simd [byte]          SIMD lane match byte for inspect (default: '/')\n");
     write_stdout("  --offset <N>           Base address offset for inspect hexdump (default: 0)\n\n");
 }
@@ -93,12 +94,12 @@ fn handle_filecheck(file_arg: const u8[:], prefix_arg: const u8[:]) -> i32 {
     return 0;
 }
 
-fn run_lit_suite(target_path: const u8[:], verbose: bool) -> i32 {
+fn run_lit_suite(target_path: const u8[:], verbose: bool, lit_cfg: const crap::LitConfig&) -> i32 {
     write_stdout("=== Goose LIT Test Runner ===\n");
 
     if file_exists(target_path) && !is_dir(target_path) {
         var res = lit::TestResult { .. };
-        let ok = lit::run_single_lit_test(target_path, verbose, res);
+        let ok = lit::run_single_lit_test_with_timeout(target_path, verbose, lit_cfg.timeout_sec, res);
         if res.status == lit::TestStatus.Pass {
             write_stdout("PASS: ");
             write_stdout(target_path);
@@ -122,6 +123,12 @@ fn run_lit_suite(target_path: const u8[:], verbose: bool) -> i32 {
             write_stdout(target_path);
             write_stdout("\n");
             return 0;
+        } else if res.status == lit::TestStatus.Timeout {
+            write_stdout("TIMEOUT: ");
+            write_stdout(target_path);
+            write_stdout("\n");
+            write_stdout(res.diag[..]);
+            return 1;
         } else if res.status == lit::TestStatus.XPass {
             write_stdout("XPASS: ");
             write_stdout(target_path);
@@ -138,7 +145,7 @@ fn run_lit_suite(target_path: const u8[:], verbose: bool) -> i32 {
     }
 
     var test_files: u8[>..] = [];
-    let count = lit::discover_test_files(target_path, test_files);
+    let count = lit::discover_test_files_filtered(target_path, lit_cfg.exclude_buf[..], test_files);
 
     if count == 0 {
         write_stdout("No test files found in ");
@@ -168,7 +175,7 @@ fn run_lit_suite(target_path: const u8[:], verbose: bool) -> i32 {
         guard t_file.len > 0 else { continue; }
 
         var res = lit::TestResult { .. };
-        let ok = lit::run_single_lit_test(t_file, verbose, res);
+        let ok = lit::run_single_lit_test_with_timeout(t_file, verbose, lit_cfg.timeout_sec, res);
         total_time_us += res.duration_us;
 
         if res.status == lit::TestStatus.Pass {
@@ -194,6 +201,12 @@ fn run_lit_suite(target_path: const u8[:], verbose: bool) -> i32 {
             write_stdout("  [UNSUPPORTED] ");
             write_stdout(t_file);
             write_stdout("\n");
+        } else if res.status == lit::TestStatus.Timeout {
+            failed_count += 1;
+            write_stdout("  [TIMEOUT] ");
+            write_stdout(t_file);
+            write_stdout("\n");
+            write_stdout(res.diag[..]);
         } else if res.status == lit::TestStatus.XPass {
             xpass_count += 1;
             failed_count += 1;
@@ -254,12 +267,13 @@ fn main() {
     crap::load_lit_config(custom_config, lit_cfg);
 
     if all_args.len <= 1 {
-        if lit_cfg.tests_dir_buf.len > 0 && (is_dir(lit_cfg.tests_dir_buf[..]) || file_exists(lit_cfg.tests_dir_buf[..])) {
-            let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], false);
+        let cfg_tests = lit_cfg.tests_dir_buf[..];
+        if cfg_tests.len > 0 && (is_dir(cfg_tests) || file_exists(cfg_tests)) {
+            let rc = run_lit_suite(cfg_tests, false, lit_cfg);
             sys_exit(rc);
             return;
         } else if is_dir("tests") || file_exists("tests") {
-            let rc = run_lit_suite("tests", false);
+            let rc = run_lit_suite("tests", false, lit_cfg);
             sys_exit(rc);
             return;
         }
@@ -388,6 +402,13 @@ fn main() {
         let a = all_args[idx];
         if a == "--verbose" || a == "-v" {
             verbose = true;
+        } else if a == "--timeout" && idx + 1 < all_args.len {
+            let t_val, ok = crap::parse_i64_slice(all_args[idx + 1]);
+            if ok && t_val > 0 {
+                lit_cfg.timeout_sec = t_val;
+                lit_cfg.has_timeout = true;
+            }
+            idx++;
         } else if a == "--config" && idx + 1 < all_args.len {
             idx++;
         } else if !crap::slice_starts_with(a, "-") && cli_target.len == 0 {
@@ -397,19 +418,19 @@ fn main() {
     }
 
     if cli_target.len > 0 {
-        let rc = run_lit_suite(cli_target, verbose);
+        let rc = run_lit_suite(cli_target, verbose, lit_cfg);
         sys_exit(rc);
         return;
     }
 
     if lit_cfg.tests_dir_buf.len > 0 && (is_dir(lit_cfg.tests_dir_buf[..]) || file_exists(lit_cfg.tests_dir_buf[..])) {
-        let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose);
+        let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose, lit_cfg);
         sys_exit(rc);
         return;
     }
 
     if is_dir("tests") || file_exists("tests") {
-        let rc = run_lit_suite("tests", verbose);
+        let rc = run_lit_suite("tests", verbose, lit_cfg);
         sys_exit(rc);
         return;
     }
