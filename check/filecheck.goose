@@ -27,19 +27,6 @@ struct CheckRule {
     pattern: u8[..512] = [],
 }
 
-fn check_kind_name(k: CheckKind) -> const u8[:] {
-    return match k {
-        Check => "CHECK",
-        Next => "CHECK-NEXT",
-        Not => "CHECK-NOT",
-        Label => "CHECK-LABEL",
-        Same => "CHECK-SAME",
-        Empty => "CHECK-EMPTY",
-        Dag => "CHECK-DAG",
-        Count => "CHECK-COUNT",
-    };
-}
-
 struct FileCheckVar {
     name: u8[..64]  = [],
     val:  u8[..256] = [],
@@ -152,12 +139,14 @@ fn parse_bracket_seg(body: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
         let minus_pos = crap::slice_index_of_byte(num_body, '-');
         if plus_pos > 0 {
             let name = crap::trim_ascii(num_body[..plus_pos]);
-            let off_val, _ = crap::parse_i64_slice(crap::trim_ascii(num_body[plus_pos + 1..]));
+            let off_val, ok = crap::parse_i64_slice(crap::trim_ascii(num_body[plus_pos + 1..]));
+            guard ok else { return false; }
             return push_seg(out_segs, SegKind.NumExpr, name, "", off_val);
         }
         if minus_pos > 0 {
             let name = crap::trim_ascii(num_body[..minus_pos]);
-            let off_val, _ = crap::parse_i64_slice(crap::trim_ascii(num_body[minus_pos + 1..]));
+            let off_val, ok = crap::parse_i64_slice(crap::trim_ascii(num_body[minus_pos + 1..]));
+            guard ok && off_val != -9223372036854775808 else { return false; }
             return push_seg(out_segs, SegKind.NumExpr, name, "", -off_val);
         }
         if num_body.len == 0 {
@@ -361,6 +350,10 @@ fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckCont
                 }
 
                 if seg.kind == SegKind.VarDef || seg.kind == SegKind.NumDef {
+                    guard local_vars.len < local_vars.cap else {
+                        match_ok = false;
+                        break;
+                    }
                     let captured = line[capture_start..pos];
                     var lv = FileCheckVar { .. };
                     for b in seg.text[..] { if lv.name.len < lv.name.cap { lv.name.push(b); } }
@@ -509,6 +502,7 @@ fn run_filecheck(
     var last_matched_line: i64 = -1;
     var last_matched_col:  i64 = 0;
     var ctx = FileCheckContext { .. };
+    var claimed: i64[>..] = [];
 
     var r_idx: i64 = 0;
     while r_idx < rules.len {
@@ -740,7 +734,7 @@ fn run_filecheck(
                 next_r += 1;
             }
 
-            var claimed: i64[>..] = [];
+            claimed.clear();
             var max_matched_line = in_idx - 1;
 
             var d_i = r_idx;
@@ -761,9 +755,7 @@ fn run_filecheck(
                         if match_pattern_in_line(l_str, d_pat, ctx, dummy_col) {
                             found_dag_line = l_i;
                             claimed.push(l_i);
-                            if l_i > max_matched_line {
-                                max_matched_line = l_i;
-                            }
+                            max_matched_line = max(max_matched_line, l_i);
                             break;
                         }
                     }

@@ -14,7 +14,6 @@ import crap.ast.model;
 import crap.ast.analyzer;
 import crap.compiler.bridge;
 import crap.coverage.profile;
-import crap.coverage.instrument;
 import crap.metrics.crap;
 import crap.report.formatter;
 import crap.report.ratchet;

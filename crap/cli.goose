@@ -11,7 +11,6 @@ import sys.proc;
 import crap.ast.model;
 import crap.ast.analyzer;
 import crap.compiler.bridge;
-import crap.coverage.instrument;
 import crap.coverage.profile;
 import crap.metrics.crap;
 import crap.report.formatter;
@@ -24,7 +23,6 @@ fn print_crap_usage() {
     write_stdout("Goose Change Risk Anti-Pattern (G-CRAP) and Safety Risk Radar.\n\n");
     write_stdout("Analysis & Execution Options:\n");
     write_stdout("  --gate [val]            Enforce G-CRAP risk gate ceiling (default 25.0, exits with 1 on violation)\n");
-    write_stdout("  --cover <test.goose>    Instrument, run test suite, and capture branch coverage\n");
     write_stdout("  --bce-lines [file]      Import pre-captured goose --bce-lines output or auto-run\n");
     write_stdout("  --specs [file]          Import pre-captured goose --specs output or auto-run\n");
     write_stdout("  --cov <val|file>        Set simulated coverage (0.0..1.0) or load .gcrap-cov profile\n");
@@ -44,28 +42,6 @@ fn print_crap_usage() {
     write_stdout("  --delta <val>           G-CRAP regression tolerance for ratchet (default 5.0)\n");
     write_stdout("  --config <file>         Load custom configuration file (default: .litconfig)\n");
     write_stdout("  --help, -h              Print this help text\n\n");
-}
-
-fn resolve_crap_shim_path(out: u8[>..]&) -> bool {
-    var env_val: u8[>..] = [];
-    if env("GCRAP_SHIM_PATH", env_val) && env_val.len > 0 {
-        if file_exists(env_val[..]) {
-            normalize_slashes(env_val[..], out);
-            return true;
-        }
-    }
-
-    if file_exists("shim/proc.c") {
-        out.append("shim/proc.c");
-        return true;
-    }
-
-    if file_exists("../shim/proc.c") {
-        out.append("../shim/proc.c");
-        return true;
-    }
-
-    return false;
 }
 
 fn run_crap_cli() -> i32 {
@@ -88,8 +64,7 @@ fn run_crap_cli() -> i32 {
     }
     var target_paths_blob: u8[>..] = [];
     var explain_mode = false;
-    var cover_test_files: u8[>..]     = [];
-    var bce_file:         const u8[:] = "";
+    var bce_file: const u8[:] = "";
     var auto_bce = false;
     var specs_file: const u8[:] = "";
     var auto_specs = false;
@@ -144,28 +119,6 @@ fn run_crap_cli() -> i32 {
             }
         } else if arg == "--include-tests" {
             include_tests = true;
-        } else if arg == "--cover" && i + 1 < all_args.len {
-            let cov_arg = all_args[i + 1];
-            var seg_start: i64 = 0;
-            for c_i in cov_arg.len {
-                if cov_arg[c_i] == ',' {
-                    guard seg_start <= c_i && c_i <= cov_arg.len else { break; }
-                    let seg = trim_ascii(cov_arg[seg_start..c_i]);
-                    if seg.len > 0 {
-                        cover_test_files.append(seg);
-                        cover_test_files.push('\n');
-                    }
-                    seg_start = c_i + 1;
-                }
-            }
-            if seg_start <= cov_arg.len {
-                let last_seg = trim_ascii(cov_arg[seg_start..]);
-                if last_seg.len > 0 {
-                    cover_test_files.append(last_seg);
-                    cover_test_files.push('\n');
-                }
-            }
-            i++;
         } else if arg == "--bce-lines" {
             if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "--") {
                 bce_file = all_args[i + 1];
@@ -196,8 +149,7 @@ fn run_crap_cli() -> i32 {
             cfg.has_coverage_profile = true;
             i++;
         } else if arg == "--format" && i + 1 < all_args.len {
-            format_buf.clear();
-            format_buf.append(all_args[i + 1]);
+            set_bounded(format_buf, all_args[i + 1]);
             i++;
         } else if arg == "--out" && i + 1 < all_args.len {
             out_file = all_args[i + 1];
@@ -208,13 +160,11 @@ fn run_crap_cli() -> i32 {
             no_baseline = true;
             baseline_buf.clear();
         } else if arg == "--baseline" && i + 1 < all_args.len {
-            baseline_buf.clear();
-            baseline_buf.append(all_args[i + 1]);
+            set_bounded(baseline_buf, all_args[i + 1]);
             i++;
         } else if arg == "--save-baseline" {
             if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "-") {
-                save_baseline_buf.clear();
-                save_baseline_buf.append(all_args[i + 1]);
+                set_bounded(save_baseline_buf, all_args[i + 1]);
                 i++;
             } else {
                 default_save_baseline_path(lit_cfg.baseline_buf[..], save_baseline_buf);
@@ -265,21 +215,7 @@ fn run_crap_cli() -> i32 {
     let save_baseline_file_path: const u8[:] = save_baseline_buf[..];
     let baseline_file:           const u8[:] = baseline_buf[..];
     let format_mode:             const u8[:] = format_buf[..];
-    let target_arg:              const u8[:] = target_arg_buf[..];
-
-    var target_buf: u8[>..] = [];
-    if target_arg.len > 0 {
-        target_buf.append(target_arg);
-    } else if cover_test_files.len > 0 {
-        var first_test_nl: i64 = -1;
-        for c_i in cover_test_files.len {
-            if cover_test_files[c_i] == '\n' { first_test_nl = c_i; break; }
-        }
-        if first_test_nl > 0 {
-            target_buf.append(cover_test_files[..first_test_nl]);
-        }
-    }
-    let target_path: const u8[:] = target_buf[..];
+    let target_path:             const u8[:] = target_arg_buf[..];
 
     if target_path.len == 0 {
         write_stderr("Error: Missing target file or directory path.\n");

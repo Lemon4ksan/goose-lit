@@ -11,14 +11,6 @@ import sys.bytes;
 import crap.lexer.scanner;
 import crap.ast.model;
 
-// Context structure for analyzing a file
-struct FileAnalysisState {
-    cur_namespace_off: i32 = -1,
-    cur_namespace_len: i32 = 0,
-    file_off:          i32 = 0,
-    file_len:          i32 = 0,
-}
-
 fn is_untrusted_path_or_ns(path: const u8[:], ns: const u8[:]) -> bool {
     if slice_contains(path, "untrusted") || slice_contains(ns, "untrusted") { return true; }
     if slice_contains(path, "wire") || slice_contains(ns, "wire") { return true; }
@@ -49,9 +41,11 @@ fn analyze_goose_file_with_calls(
 
     let file_off, file_len = pool_add(pool, file_path);
 
-    var cur_ns_off: i32     = -1;
-    var cur_ns_len: i32     = 0;
-    var ns_name:    u8[>..] = [];
+    var cur_ns_off:  i32     = -1;
+    var cur_ns_len:  i32     = 0;
+    var ns_name:     u8[>..] = [];
+    var fn_name_buf: u8[>..] = [];
+    var qual_buf:    u8[>..] = [];
 
     var tok_idx: i64 = 0;
     let num_tokens = tokens.len;
@@ -135,13 +129,13 @@ fn analyze_goose_file_with_calls(
 
             let fn_st: i64 = name_tok.start;
             let fn_en: i64 = name_tok.start + name_tok.len;
-            var fn_name_buf: u8[>..] = [];
+            fn_name_buf.clear();
             fn_name_buf.append(src[fn_st..fn_en]);
             tok_idx++;
 
             // Case function variant parameter or name: e.g. `fn eval(e: Expr.Add&)`
             // Build qualified name: ns::name or name
-            var qual_buf: u8[>..] = [];
+            qual_buf.clear();
             if !force_global_ns {
                 if explicit_ns_off >= 0 && explicit_ns_len > 0 {
                     qual_buf.append(pool_slice(pool, explicit_ns_off, explicit_ns_len));
@@ -290,9 +284,7 @@ fn analyze_goose_file_with_calls(
 
                 if bt.kind == TOK_LCURLY {
                     block_nest++;
-                    if block_nest > max_depth {
-                        max_depth = block_nest;
-                    }
+                    max_depth = max(max_depth, block_nest);
                     if block_nest < 64 {
                         if pending_match_brace {
                             is_match_brace[block_nest] = true;
@@ -828,10 +820,7 @@ fn analyze_goose_file_with_calls(
                 }
             }
 
-            var effective_cc = cognitive;
-            if effective_cc < 1 {
-                effective_cc = 1;
-            }
+            let effective_cc = max(1, cognitive);
 
             functions.push(FunctionInfo {
                 func_idx:         fn_idx,
@@ -889,18 +878,6 @@ fn analyze_goose_file_with_calls(
 
         tok_idx++;
     }
-}
-
-// Backwards-compatible convenience wrapper without call site tracking.
-fn analyze_goose_file(
-    file_path: const u8[:],
-    src:       const u8[:],
-    pool:      u8[>..]&,
-    functions: FunctionInfo[>..]&,
-    branches:  BranchSite[>..]&,
-) {
-    var dummy_calls: CallSite[>..] = [];
-    analyze_goose_file_with_calls(file_path, src, pool, functions, branches, dummy_calls);
 }
 
 // Iterative BFS over the interprocedural call graph to propagate untrusted taint.

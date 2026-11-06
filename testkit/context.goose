@@ -59,7 +59,8 @@ fn new_runner(suite_name: const u8[:], verbosity: Verbosity = Verbosity.Normal) 
         verbosity:        verbosity,
         watch:            stopwatch(),
     };
-    r.suite_name.append(suite_name);
+    let nlen = min(suite_name.len, r.suite_name.cap);
+    r.suite_name.append(suite_name[..nlen]);
     return r;
 }
 
@@ -75,7 +76,8 @@ fn new_test(name: const u8[:], level: i64 = 0) -> T {
         watch:            stopwatch(),
         level:            level,
     };
-    t.name.append(name);
+    let nlen = min(name.len, t.name.cap);
+    t.name.append(name[..nlen]);
     return t;
 }
 

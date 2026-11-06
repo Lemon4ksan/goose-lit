@@ -6,6 +6,13 @@ namespace crap;
 
 import std;
 
+fn set_bounded<B>(dst: B&, src: const u8[:]) -> bool {
+    guard src.len <= dst.cap else { return false; }
+    dst.clear();
+    dst.append(src);
+    return true;
+}
+
 fn is_ascii_space(c: u8) -> bool {
     return c == ' ' || c == '\t' || c == '\r' || c == '\n';
 }
@@ -96,7 +103,9 @@ fn parse_u64_slice(s: const u8[:]) -> u64, bool {
     var val: u64 = 0;
     for c in t {
         guard is_ascii_digit(c) else { return 0, false; }
-        val = val * 10 + (c - '0');
+        let digit = (c - '0') as u64;
+        guard val <= (18446744073709551615 - digit) / 10 else { return 0, false; }
+        val = val * 10 + digit;
     }
     return val, true;
 }
@@ -116,8 +125,10 @@ fn parse_i64_slice(s: const u8[:]) -> i64, bool {
     let uval, ok = parse_u64_slice(t[idx..]);
     guard ok else { return 0, false; }
     if neg {
-        return -(uval as i64), true;
+        guard uval <= 9223372036854775808 else { return 0, false; }
+        return (0 - uval) as! i64, true;
     }
+    guard uval <= 9223372036854775807 else { return 0, false; }
     return uval as i64, true;
 }
 
@@ -221,17 +232,26 @@ fn append_u64<B>(out: B&, val: u64) {
 fn append_i64<B>(out: B&, val: i64) {
     if val < 0 {
         out.push('-');
-        append_u64(out, (-val) as u64);
+        append_u64(out, 0 - (val as! u64));
     } else {
         append_u64(out, val as u64);
     }
 }
 
 fn append_f64_1<B>(out: B&, val: f64) {
+    guard val == val else {
+        out.append("0.0");
+        return;
+    }
     var v = val;
     if v < 0.0 {
         out.push('-');
         v = -v;
+    }
+    if v >= 1e17 {
+        append_u64(out, 99999999999999999);
+        out.append(".0");
+        return;
     }
     let scaled = ((v * 10.0) + 0.5) as! u64;
     let whole = scaled / 10;
@@ -242,10 +262,19 @@ fn append_f64_1<B>(out: B&, val: f64) {
 }
 
 fn append_f64_2<B>(out: B&, val: f64) {
+    guard val == val else {
+        out.append("0.00");
+        return;
+    }
     var v = val;
     if v < 0.0 {
         out.push('-');
         v = -v;
+    }
+    if v >= 1e16 {
+        append_u64(out, 9999999999999999);
+        out.append(".00");
+        return;
     }
     let scaled = ((v * 100.0) + 0.5) as! u64;
     let whole = scaled / 100;

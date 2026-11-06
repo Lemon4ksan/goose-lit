@@ -136,30 +136,6 @@ fn run_goose_specs(target_path: const u8[:], out: u8[>..]&) -> i32 {
     return exec_capture(cmd, out);
 }
 
-// Executes differential BCE capture: runs both -O0 and -O2 on target entry point.
-fn run_goose_differential_bce(target_path: const u8[:], out_o0: u8[>..]&, out_o2: u8[>..]&) -> i32 {
-    var entry: u8[>..] = [];
-    resolve_package_entry_point(target_path, entry);
-
-    var cmd_o0: u8[>..] = [];
-    cmd_o0.append("goose -O0 --bce-lines --check");
-    append_compiler_options(cmd_o0);
-    cmd_o0.append(" \"");
-    cmd_o0.append(entry);
-    cmd_o0.append("\"");
-    let rc0 = exec_capture(cmd_o0, out_o0);
-
-    var cmd_o2: u8[>..] = [];
-    cmd_o2.append("goose -O2 --bce-lines --check");
-    append_compiler_options(cmd_o2);
-    cmd_o2.append(" \"");
-    cmd_o2.append(entry);
-    cmd_o2.append("\"");
-    let rc2 = exec_capture(cmd_o2, out_o2);
-
-    return if rc2 != 0 { rc2 } else { rc0 };
-}
-
 // Parses one bce-line record: "bce-line: <file>:<line>: <elided> elided, <kept> kept"
 fn parse_bce_line(
     raw_line:     const u8[:],
@@ -241,6 +217,7 @@ fn apply_bce_lines_blob(
 ) {
     var line_start: i64 = 0;
     let n = output_blob.len;
+    var file_buf: u8[>..] = [];
 
     while line_start < n {
         var line_end = n;
@@ -254,10 +231,10 @@ fn apply_bce_lines_blob(
         let raw_line = output_blob[line_start..line_end];
         line_start = line_end + 1;
 
-        var file_buf: u8[>..] = [];
-        var line_num: i32     = 0;
-        var elided:   i32     = 0;
-        var kept:     i32     = 0;
+        file_buf.clear();
+        var line_num: i32 = 0;
+        var elided:   i32 = 0;
+        var kept:     i32 = 0;
 
         if parse_bce_line(raw_line, file_buf, line_num, elided, kept) {
             // Find matching function
@@ -298,138 +275,6 @@ fn apply_bce_lines_blob(
                                 }
                                 functions[fi].total_bce_elide += elided;
                                 functions[fi].total_bce_keep += kept;
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-struct BceRecord {
-    file_off: i32 = 0,
-    file_len: i32 = 0,
-    line:     i32 = 0,
-    elided:   i32 = 0,
-    kept:     i32 = 0,
-}
-
-// Applies differential BCE analysis, decoupling intrinsic -O0 bounds checks
-// from caller inlining multipliers observed under -O2.
-fn apply_differential_bce(
-    blob_o0:   const u8[:],
-    blob_o2:   const u8[:],
-    pool:      const u8[:],
-    functions: FunctionInfo[>..]&,
-    branches:  BranchSite[>..]&,
-) {
-    // 1. Ingest -O0 baseline records (representing intrinsic un-inlined checks)
-    var pool_o0:    u8[>..]        = [];
-    var records_o0: BceRecord[>..] = [];
-
-    var l_start: i64 = 0;
-    let n0 = blob_o0.len;
-    while l_start < n0 {
-        var l_end = n0;
-        for i in l_start..n0 {
-            if blob_o0[i] == '\n' { l_end = i; break; }
-        }
-        let raw_line = blob_o0[l_start..l_end];
-        l_start = l_end + 1;
-
-        var f_buf:  u8[>..] = [];
-        var l_num:  i32     = 0;
-        var elided: i32     = 0;
-        var kept:   i32     = 0;
-        if parse_bce_line(raw_line, f_buf, l_num, elided, kept) {
-            let fo, fl = pool_add(pool_o0, f_buf);
-            records_o0.push(BceRecord {
-                file_off: fo,
-                file_len: fl,
-                line:     l_num,
-                elided:   elided,
-                kept:     kept,
-            });
-        }
-    }
-
-    // 2. Map -O2 records, decoupling intrinsic from inlined copies
-    var line_start: i64 = 0;
-    let n2 = blob_o2.len;
-
-    while line_start < n2 {
-        var line_end = n2;
-        for i in line_start..n2 {
-            if blob_o2[i] == '\n' { line_end = i; break; }
-        }
-        let raw_line = blob_o2[line_start..line_end];
-        line_start = line_end + 1;
-
-        var file_buf: u8[>..] = [];
-        var line_num: i32     = 0;
-        var elided:   i32     = 0;
-        var kept:     i32     = 0;
-
-        if parse_bce_line(raw_line, file_buf, line_num, elided, kept) {
-            // Find corresponding record in -O0 baseline
-            var k0: i32 = -1;
-            for ri in records_o0.len {
-                let r_file = pool_slice(pool_o0, records_o0[ri].file_off, records_o0[ri].file_len);
-                if records_o0[ri].line == line_num && paths_match(r_file, file_buf) {
-                    k0 = records_o0[ri].kept;
-                    break;
-                }
-            }
-
-            var intrinsic_kept: i32 = kept;
-            var inlined_kept:   i32 = 0;
-            if k0 >= 0 {
-                intrinsic_kept = if k0 > 0 && kept > k0 { k0 } else { kept };
-                inlined_kept = if kept > k0 { kept - k0 } else { 0 };
-            }
-
-            // Find matching function and branch
-            for fi in functions.len {
-                let fn_file = pool_slice(pool, functions[fi].file_off, functions[fi].file_len);
-                if paths_match(fn_file, file_buf) {
-                    let st = functions[fi].start_line;
-                    let en = functions[fi].end_line;
-                    if line_num >= st && line_num <= en {
-                        // Find innermost branch site
-                        let f_first = functions[fi].first_branch;
-                        let f_count = functions[fi].branch_count;
-                        var matched_bid: i64 = -1;
-                        var best_depth:  i32 = -1;
-
-                        for bi in f_count {
-                            let idx: i64 = f_first + bi;
-                            if idx < branches.len {
-                                let b_start = branches[idx].start_line;
-                                let b_end = branches[idx].end_line;
-                                if line_num >= b_start && line_num <= b_end && branches[idx].depth >= best_depth {
-                                    matched_bid = idx;
-                                    best_depth = branches[idx].depth;
-                                }
-                            }
-                        }
-
-                        if matched_bid >= 0 {
-                            if branches[matched_bid].trusted_bounds {
-                                branches[matched_bid].bce_elide += (elided + intrinsic_kept);
-                                branches[matched_bid].classification = BRANCH_CLASS_DEFENSIVE;
-                                functions[fi].total_bce_elide += (elided + intrinsic_kept);
-                            } else {
-                                branches[matched_bid].bce_elide += elided;
-                                branches[matched_bid].bce_keep += intrinsic_kept;
-                                branches[matched_bid].bce_inlined += inlined_kept;
-                                if branches[matched_bid].bce_keep > 0 {
-                                    branches[matched_bid].classification = BRANCH_CLASS_BOUNDS_CHECK;
-                                }
-                                functions[fi].total_bce_elide += elided;
-                                functions[fi].total_bce_keep += intrinsic_kept;
-                                functions[fi].total_bce_inlined += inlined_kept;
                             }
                         }
                         break;
@@ -517,12 +362,8 @@ fn apply_specs_blob(
                 let sname = pool_slice(pool, functions[fi].name_off, functions[fi].name_len);
                 if sig_name == qname || sig_name == sname {
                     functions[fi].specs_count++;
-                    if cur_nodes > functions[fi].max_spec_nodes {
-                        functions[fi].max_spec_nodes = cur_nodes;
-                    }
-                    if cur_nest > functions[fi].compiler_nest {
-                        functions[fi].compiler_nest = cur_nest;
-                    }
+                    functions[fi].max_spec_nodes = max(functions[fi].max_spec_nodes, cur_nodes);
+                    functions[fi].compiler_nest = max(functions[fi].compiler_nest, cur_nest);
                     if cur_noinline {
                         functions[fi].has_noinline = true;
                     }

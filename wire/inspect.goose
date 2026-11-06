@@ -24,7 +24,7 @@ fn format_hexdump(buf: const u8[:], base_addr: i64, out: u8[>..]&) {
         out.push(hex_chars[(cur_addr & 0xF) as! i64]);
         out.append("]  ");
 
-        let row_bytes = if (n - offset) < 16 { n - offset } else { 16 };
+        let row_bytes = min(n - offset, 16);
 
         // Hex bytes (16 columns with middle spacing)
         for i: i64 in 0..16 {
@@ -60,7 +60,7 @@ fn format_hexdump(buf: const u8[:], base_addr: i64, out: u8[>..]&) {
 // Inspects a 16-byte slice window for a target byte and calculates the 16-bit match bitmask.
 fn format_simd_lanes(buf: const u8[:], target_b: u8, base_addr: i64, out: u8[>..]&) -> u32 {
     let hex_chars = "0123456789ABCDEF";
-    let window_len = if buf.len < 16 { buf.len } else { 16 };
+    let window_len = min(buf.len, 16);
 
     out.append("128-bit SIMD Window [0x");
     out.push(hex_chars[((base_addr >> 12) & 0xF) as! i64]);

@@ -268,14 +268,6 @@ fn is_test_candidate(path: const u8[:], name: const u8[:]) -> bool {
 }
 
 // Executes all // RUN: directives in a single test file.
-fn run_single_lit_test(
-    file_path: const u8[:],
-    verbose:   bool,
-    res:       TestResult&,
-) -> bool {
-    return run_single_lit_test_with_timeout(file_path, verbose, 0, res);
-}
-
 fn run_single_lit_test_with_timeout(
     file_path:           const u8[:],
     verbose:             bool,
@@ -379,7 +371,8 @@ fn run_single_lit_test_with_timeout(
 
     let t0 = (monotonic_now().nanos as! i64) / 1000;
     var timed_out = false;
-    let timeout_ms: i32 = if timeout_sec > 0 { (timeout_sec * 1000) as! i32 } else { 0 };
+    let clamped_sec = min(timeout_sec, 2147483);
+    let timeout_ms: i32 = if clamped_sec > 0 { (clamped_sec * 1000) as! i32 } else { 0 };
     var cmd:     u8[>..] = [];
     var run_out: u8[>..] = [];
 
@@ -479,10 +472,6 @@ fn run_single_lit_test_with_timeout(
 }
 
 // Discovers all test files under a directory tree using an iterative BFS queue.
-fn discover_test_files(dir_path: const u8[:], out_paths: u8[>..]&) -> i64 {
-    return discover_test_files_filtered(dir_path, "", out_paths);
-}
-
 // crap:trusted
 // crap:trusted-bounds
 fn discover_test_files_filtered(

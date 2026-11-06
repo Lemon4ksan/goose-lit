@@ -144,27 +144,6 @@ fn load_lcov_profile(
     return true;
 }
 
-// Writes a standalone `.gcrap-cov` profile.
-fn save_gcrap_profile(
-    profile_path: const u8[:],
-    pool:         const u8[:],
-    functions:    const FunctionInfo[:],
-    branches:     const BranchSite[:],
-) -> bool {
-    var out: u8[>..] = [];
-    out.append("# goose-crap branch coverage profile v1\n");
-
-    for bi in branches.len {
-        let b = branches[bi];
-        out.append("id ");
-        append_i64(out, b.branch_id);
-        out.push(' ');
-        append_u64(out, b.hits);
-        out.push('\n');
-    }
-    return write_file(profile_path, out);
-}
-
 // Aggregates branch coverage metrics and safety invariants onto each function.
 fn aggregate_coverage_metrics(
     cfg:       const RiskConfig&,

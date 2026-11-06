@@ -16,7 +16,7 @@ fn append_hex_byte<B>(out: B&, b: u8) {
 fn format_bytes_diff<B>(out: B&, got: const u8[:], want: const u8[:]) {
     out.append("  len: got ");
     format(out, got.len, ", want ", want.len, "\n");
-    let min_len = if got.len < want.len { got.len } else { want.len };
+    let min_len = min(got.len, want.len);
     var diff_idx = -1;
     for i in min_len {
         if got[i] != want[i] {

@@ -52,7 +52,7 @@ fn verify_split_stream<F: fn(const u8[:]) -> i64>(
     }
 
     out_diag.append("SPLIT_CHECK PASSED: all ");
-    format(out_diag, if total_len > 1 { total_len - 1 } else { 0 });
+    format(out_diag, max(0, total_len - 1));
     out_diag.append(" prefixes returned incomplete code ");
     format(out_diag, incomplete_code);
     out_diag.append(", full packet returned ok code ");

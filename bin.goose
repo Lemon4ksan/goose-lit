@@ -331,8 +331,7 @@ fn main() {
         while idx < all_args.len {
             let a = all_args[idx];
             if (a == "--prefix" || a == "-prefix") && idx + 1 < all_args.len {
-                prefix_buf.clear();
-                prefix_buf.append(all_args[idx + 1]);
+                crap::set_bounded(prefix_buf, all_args[idx + 1]);
                 idx++;
             } else if a == "--config" && idx + 1 < all_args.len {
                 idx++;
@@ -346,13 +345,7 @@ fn main() {
         return;
     }
 
-    if first == "gate" {
-        let rc = crap::run_crap_cli();
-        sys_exit(rc);
-        return;
-    }
-
-    if first == "crap" {
+    if first == "gate" || first == "crap" {
         let rc = crap::run_crap_cli();
         sys_exit(rc);
         return;

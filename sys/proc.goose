@@ -16,10 +16,6 @@ extern fn native_exec_to_file_timeout(
     timeout_ms: i32,
 ) -> i32 = "crap_exec_to_file_timeout";
 extern fn native_setenv(key: const u8[:], val: const u8[:]) -> i32 = "crap_setenv";
-extern fn native_cov_hit(id: i32) = "crap_cov_hit";
-extern fn native_cov_reset() = "crap_cov_reset";
-extern fn native_cov_get(id: i32) -> i64 = "crap_cov_get";
-extern fn native_cov_dump(path: const u8[:]) -> i32 = "crap_cov_dump";
 extern fn native_host_os() -> i32 = "crap_host_os";
 extern fn native_host_arch() -> i32 = "crap_host_arch";
 extern fn native_cpu_count() -> i32 = "crap_cpu_count";
@@ -92,12 +88,6 @@ fn exec_capture_timeout(cmd: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32
         delete_file(tmp_path);
     }
     return rc;
-}
-
-// Iterative file collection that avoids recursive frame allocation (§7.8).
-// Appends newline-separated paths of all matching `.goose` files into `out_paths_blob`.
-fn collect_goose_files(root_path: const u8[:], include_tests: bool, out_paths_blob: u8[>..]&) {
-    collect_goose_files_filtered(root_path, include_tests, "", out_paths_blob);
 }
 
 inline fn is_ignored_dir_entry(name: const u8[:]) -> bool {

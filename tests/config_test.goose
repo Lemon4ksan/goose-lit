@@ -55,6 +55,24 @@ fn test_parse_config() {
     var empty_save: u8[..256] = [];
     crap::default_save_baseline_path("", empty_save);
     assert(empty_save == ".lit/baseline" || empty_save == ".lit-baseline");
+
+    // Verify integer parsing overflow and i64::MIN formatting invariants
+    let min_val, ok_min = crap::parse_i64_slice("-9223372036854775808");
+    assert(ok_min);
+    assert(min_val == (-9223372036854775807 - 1));
+
+    var min_buf: u8[..32] = [];
+    crap::append_i64(min_buf, min_val);
+    assert(min_buf == "-9223372036854775808");
+
+    let _, ok_ovf_pos = crap::parse_i64_slice("9223372036854775808");
+    assert(!ok_ovf_pos);
+
+    let _, ok_ovf_neg = crap::parse_i64_slice("-9223372036854775809");
+    assert(!ok_ovf_neg);
+
+    let _, ok_ovf_u64 = crap::parse_u64_slice("18446744073709551616");
+    assert(!ok_ovf_u64);
 }
 
 fn main() {

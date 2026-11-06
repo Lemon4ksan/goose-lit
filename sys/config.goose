@@ -107,8 +107,7 @@ fn is_excluded_path(path: const u8[:], exclude_blob: const u8[:]) -> bool {
 
 fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bool {
     if key == "baseline" {
-        cfg.baseline_buf.clear();
-        cfg.baseline_buf.append(val);
+        set_bounded(cfg.baseline_buf, val);
         return true;
     }
     if key == "exclude" {
@@ -116,19 +115,17 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
         return true;
     }
     if key == "tests_dir" || key == "tests" || key == "test_dir" {
-        cfg.tests_dir_buf.clear();
-        cfg.tests_dir_buf.append(val);
+        set_bounded(cfg.tests_dir_buf, val);
         return true;
     }
     if key == "src_dir" || key == "target" || key == "src" {
-        cfg.src_dir_buf.clear();
-        cfg.src_dir_buf.append(val);
+        set_bounded(cfg.src_dir_buf, val);
         return true;
     }
     if key == "goose_cc" || key == "cc" {
-        cfg.cc_buf.clear();
-        cfg.cc_buf.append(val);
-        native_setenv("GOOSE_CC", val);
+        if set_bounded(cfg.cc_buf, val) {
+            native_setenv("GOOSE_CC", val);
+        }
         return true;
     }
     return false;
@@ -136,13 +133,11 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
 
 fn apply_format_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bool {
     if key == "format" {
-        cfg.format_buf.clear();
-        cfg.format_buf.append(val);
+        set_bounded(cfg.format_buf, val);
         return true;
     }
     if key == "prefix" {
-        cfg.prefix_buf.clear();
-        cfg.prefix_buf.append(val);
+        set_bounded(cfg.prefix_buf, val);
         return true;
     }
     return false;
@@ -252,24 +247,16 @@ fn parse_config_content(content: const u8[:], cfg: LitConfig&) {
 
 fn find_config_file(custom_path: const u8[:], out: u8[..256]&) -> bool {
     if custom_path.len > 0 && file_exists(custom_path) {
-        out.clear();
-        out.append(custom_path);
-        return true;
+        return set_bounded(out, custom_path);
     }
     if file_exists(".litconfig") {
-        out.clear();
-        out.append(".litconfig");
-        return true;
+        return set_bounded(out, ".litconfig");
     }
     if file_exists("lit.conf") {
-        out.clear();
-        out.append("lit.conf");
-        return true;
+        return set_bounded(out, "lit.conf");
     }
     if file_exists("../.litconfig") {
-        out.clear();
-        out.append("../.litconfig");
-        return true;
+        return set_bounded(out, "../.litconfig");
     }
     return false;
 }
@@ -300,40 +287,30 @@ fn load_lit_config(custom_path: const u8[:], cfg: LitConfig&) -> bool {
 
 fn resolve_baseline_path(configured_baseline: const u8[:], out: u8[..256]&) -> bool {
     if configured_baseline.len > 0 && file_exists(configured_baseline) {
-        out.clear();
-        out.append(configured_baseline);
-        return true;
+        return set_bounded(out, configured_baseline);
     }
     if file_exists(".lit/baseline") {
-        out.clear();
-        out.append(".lit/baseline");
-        return true;
+        return set_bounded(out, ".lit/baseline");
     }
     if file_exists(".lit-baseline") {
-        out.clear();
-        out.append(".lit-baseline");
-        return true;
+        return set_bounded(out, ".lit-baseline");
     }
     if file_exists("../.lit/baseline") {
-        out.clear();
-        out.append("../.lit/baseline");
-        return true;
+        return set_bounded(out, "../.lit/baseline");
     }
     if file_exists("../.lit-baseline") {
-        out.clear();
-        out.append("../.lit-baseline");
-        return true;
+        return set_bounded(out, "../.lit-baseline");
     }
     return false;
 }
 
 fn default_save_baseline_path(configured_baseline: const u8[:], out: u8[..256]&) {
-    out.clear();
-    if configured_baseline.len > 0 {
-        out.append(configured_baseline);
-    } else if is_dir(".lit") || make_dir(".lit") {
-        out.append(".lit/baseline");
+    if configured_baseline.len > 0 && set_bounded(out, configured_baseline) {
+        return;
+    }
+    if is_dir(".lit") || make_dir(".lit") {
+        set_bounded(out, ".lit/baseline");
     } else {
-        out.append(".lit-baseline");
+        set_bounded(out, ".lit-baseline");
     }
 }

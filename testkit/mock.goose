@@ -36,8 +36,7 @@ fn advance_days(clock: MockClock&, days: i64) -> i64 {
 }
 
 fn monotonic_now(clock: const MockClock&) -> MonotonicInstant {
-    let ns = if clock.now_us > 0 { (clock.now_us as u64) * 1000 } else { 0 as u64 };
-    return MonotonicInstant { nanos: ns };
+    return MonotonicInstant { nanos: (max(0, clock.now_us) as u64) * 1000 };
 }
 
 // Deterministic monotonic clock for testing.

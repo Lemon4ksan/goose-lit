@@ -20,7 +20,7 @@ fn verify_latency_budget<F: fn()>(
     }
 
     // Warm-up pass
-    let warmup = if iterations > 100 { 100 } else { iterations };
+    let warmup = min(iterations, 100);
     for _ in warmup {
         F();
     }
@@ -32,7 +32,7 @@ fn verify_latency_budget<F: fn()>(
     let t1 = monotonic_now().nanos;
 
     let total_ns = (t1 - t0) as! i64;
-    let avg_ns = if total_ns > 0 { total_ns / iterations } else { 0 };
+    let avg_ns = max(0, total_ns) / iterations;
 
     out_diag.append("BENCH: ");
     format(out_diag, iterations, " iters, avg = ", avg_ns, " ns/op (budget <= ", max_ns_per_op, " ns/op)\n");

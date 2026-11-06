@@ -128,8 +128,8 @@ fn check_ratchet_gate(
                                 cov_branch:         cov_val,
                                 consumed:           false,
                             };
-                            entry.file_buf.append(file_part);
-                            entry.name_buf.append(name_part);
+                            set_bounded(entry.file_buf, file_part);
+                            set_bounded(entry.name_buf, name_part);
                             entries.push(entry);
                         }
                     }
@@ -164,7 +164,7 @@ fn check_ratchet_gate(
                         cov_branch:         cov_val,
                         consumed:           false,
                     };
-                    entry.name_buf.append(name_part);
+                    set_bounded(entry.name_buf, name_part);
                     entries.push(entry);
                 }
             }

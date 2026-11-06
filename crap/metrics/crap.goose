@@ -27,7 +27,7 @@ fn compute_crap_metrics(
         let eff_cc = functions[fi].effective_cc as f64;
         let cov = functions[fi].cov_branch;
 
-        let uncov_fraction = if cov <= 1.0 { 1.0 - cov } else { 0.0 };
+        let uncov_fraction = max(0.0, 1.0 - cov);
         let uncov_cubed = cube_f64(uncov_fraction);
 
         // 1. Classic CRAP: CC^2 * (1 - cov)^3 + CC
@@ -48,7 +48,7 @@ fn compute_crap_metrics(
             if idx < branches.len {
                 let b = branches[idx];
                 if !b.covered {
-                    let d = (if b.depth > 0 { b.depth } else { 1 }) as f64;
+                    let d = max(1, b.depth) as f64;
                     let bce_term = b.bce_keep * cfg.alpha_bce_keep;
                     let ovf_term = b.ovf_ops * cfg.beta_ovf;
                     r_safety += d * (bce_term + ovf_term);

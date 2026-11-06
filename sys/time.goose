@@ -42,8 +42,7 @@ struct MonotonicInstant {
 }
 
 fn monotonic_now() -> MonotonicInstant {
-    let raw_ns = clock_ns();
-    return MonotonicInstant { nanos: if raw_ns > 0 { raw_ns as u64 } else { 0 } };
+    return MonotonicInstant { nanos: max(0, clock_ns()) as u64 };
 }
 
 fn new_monotonic_instant(nanos_val: u64) -> MonotonicInstant {
