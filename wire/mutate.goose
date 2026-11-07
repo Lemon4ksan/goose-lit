@@ -10,6 +10,9 @@ import sys.bytes;
 // Fast deterministic 64-bit pseudo-random number generator
 fn xorshift64_step(state: u64&) -> u64 {
     var x = state;
+    if x == 0 {
+        x = 0x9E3779B97F4A7C15;
+    }
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;
@@ -21,8 +24,8 @@ fn xorshift64_step(state: u64&) -> u64 {
 // 0: single bit flip
 // 1: boundary byte injection (0x00, 0xFF, 0x7F, 0x80)
 // 2: 16-bit extreme injection (0xFFFF, 0x7FFF, 0x8000, 0x0000)
-// 3: 32-bit extreme injection (0xFFFFFFFF, 0x7FFFFFFF, 0x80000000)
-// 4: byte duplication or drop
+// 3: 32-bit extreme injection (0xFFFFFFFF, 0x7FFFFFFF, 0x80000000, 0x00000000)
+// 4: byte swap or bit flip fallback
 fn mutate_payload_once(buf: u8[>..]&, rng: u64&) {
     let n = buf.len;
     guard n > 0 else { return; }
@@ -43,33 +46,44 @@ fn mutate_payload_once(buf: u8[>..]&, rng: u64&) {
     } else if mode == 2 && n >= 2 {
         // 16-bit extreme
         let pos = (xorshift64_step(rng) % ((n - 1) as! u64)) as! i64;
-        let choice = xorshift64_step(rng) % 3;
+        let choice = xorshift64_step(rng) % 4;
         if choice == 0 {
             buf[pos] = 0xFF; buf[pos + 1] = 0xFF;
         } else if choice == 1 {
             buf[pos] = 0x7F; buf[pos + 1] = 0xFF;
+        } else if choice == 2 {
+            buf[pos] = 0x80; buf[pos + 1] = 0x00;
         } else {
             buf[pos] = 0x00; buf[pos + 1] = 0x00;
         }
     } else if mode == 3 && n >= 4 {
         // 32-bit extreme
         let pos = (xorshift64_step(rng) % ((n - 3) as! u64)) as! i64;
-        let choice = xorshift64_step(rng) % 3;
+        let choice = xorshift64_step(rng) % 4;
         if choice == 0 {
             buf[pos] = 0xFF; buf[pos + 1] = 0xFF; buf[pos + 2] = 0xFF; buf[pos + 3] = 0xFF;
         } else if choice == 1 {
             buf[pos] = 0x7F; buf[pos + 1] = 0xFF; buf[pos + 2] = 0xFF; buf[pos + 3] = 0xFF;
+        } else if choice == 2 {
+            buf[pos] = 0x80; buf[pos + 1] = 0x00; buf[pos + 2] = 0x00; buf[pos + 3] = 0x00;
         } else {
             buf[pos] = 0x00; buf[pos + 1] = 0x00; buf[pos + 2] = 0x00; buf[pos + 3] = 0x00;
         }
     } else {
-        // Byte swap
         if n >= 2 {
             let p1 = (xorshift64_step(rng) % (n as! u64)) as! i64;
-            let p2 = (xorshift64_step(rng) % (n as! u64)) as! i64;
-            let tmp = buf[p1];
-            buf[p1] = buf[p2];
-            buf[p2] = tmp;
+            let p2 = (p1 + 1 + ((xorshift64_step(rng) % ((n - 1) as! u64)) as! i64)) % n;
+            if buf[p1] != buf[p2] {
+                let tmp = buf[p1];
+                buf[p1] = buf[p2];
+                buf[p2] = tmp;
+            } else {
+                let bit = (1 << ((xorshift64_step(rng) % 8) as u32)) as u8;
+                buf[p1] ^= bit;
+            }
+        } else {
+            let bit = (1 << ((xorshift64_step(rng) % 8) as u32)) as u8;
+            buf[0] ^= bit;
         }
     }
 }
@@ -84,6 +98,10 @@ fn fuzz_payload_stream<F: fn(const u8[:]) -> bool>(
 ) -> bool {
     guard seed.len > 0 else {
         out_diag.append("fuzz_payload_stream: seed is empty\n");
+        return false;
+    }
+    guard runs > 0 else {
+        out_diag.append("fuzz_payload_stream: runs must be > 0\n");
         return false;
     }
 

@@ -7,6 +7,18 @@ namespace lit;
 import std;
 import sys.bytes;
 
+fn append_hex_addr(addr: u64, out: u8[>..]&) {
+    let hex_chars = "0123456789ABCDEF";
+    var shift: i64 = 60;
+    while shift > 12 && ((addr >> (shift as u64)) & 0xF) == 0 {
+        shift -= 4;
+    }
+    while shift >= 0 {
+        out.push(hex_chars[((addr >> (shift as u64)) & 0xF) as! i64]);
+        shift -= 4;
+    }
+}
+
 // Formats a byte slice as a hex dump with offsets and ASCII representations.
 fn format_hexdump(buf: const u8[:], base_addr: i64, out: u8[>..]&) {
     let hex_chars = "0123456789ABCDEF";
@@ -14,14 +26,11 @@ fn format_hexdump(buf: const u8[:], base_addr: i64, out: u8[>..]&) {
     var offset: i64 = 0;
 
     while offset < n {
-        let cur_addr = base_addr + offset;
+        let cur_addr = (base_addr as! u64) + (offset as! u64);
 
         // Address prefix [0x0000]
         out.append("[0x");
-        out.push(hex_chars[((cur_addr >> 12) & 0xF) as! i64]);
-        out.push(hex_chars[((cur_addr >> 8) & 0xF) as! i64]);
-        out.push(hex_chars[((cur_addr >> 4) & 0xF) as! i64]);
-        out.push(hex_chars[(cur_addr & 0xF) as! i64]);
+        append_hex_addr(cur_addr, out);
         out.append("]  ");
 
         let row_bytes = min(n - offset, 16);
@@ -63,10 +72,7 @@ fn format_simd_lanes(buf: const u8[:], target_b: u8, base_addr: i64, out: u8[>..
     let window_len = min(buf.len, 16);
 
     out.append("128-bit SIMD Window [0x");
-    out.push(hex_chars[((base_addr >> 12) & 0xF) as! i64]);
-    out.push(hex_chars[((base_addr >> 8) & 0xF) as! i64]);
-    out.push(hex_chars[((base_addr >> 4) & 0xF) as! i64]);
-    out.push(hex_chars[(base_addr & 0xF) as! i64]);
+    append_hex_addr(base_addr as! u64, out);
     out.append("..+16B] target=0x");
     out.push(hex_chars[((target_b >> 4) & 0xF) as! i64]);
     out.push(hex_chars[(target_b & 0xF) as! i64]);

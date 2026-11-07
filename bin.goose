@@ -20,12 +20,14 @@ fn print_usage() {
     write_stdout("  gate <path|file> [max] Verify G-CRAP complexity and bounds safety gate (default ceiling: 25)\n");
     write_stdout("  crap <path|file>       Run integrated G-CRAP complexity and safety risk radar\n");
     write_stdout("  inspect <file|hex>     Dump byte buffer in hex/ASCII or 128-bit SIMD lanes\n");
-    write_stdout("  version, -v            Print version\n");
-    write_stdout("  help, -h               Print this help message\n\n");
+    write_stdout("  version, -V, --version Print version\n");
+    write_stdout("  help, -h, --help       Print this help message\n\n");
     write_stdout("Options:\n");
     write_stdout("  --config <file>        Load custom configuration file (default: .litconfig)\n");
     write_stdout("  --prefix <PREF>        FileCheck match prefix (default: CHECK)\n");
     write_stdout("  --verbose, -v          Verbose output of commands and matching\n");
+    write_stdout("  --list-tests           List discovered test files without executing them\n");
+    write_stdout("  --allow-empty          Return exit code 0 when no test files are discovered\n");
     write_stdout("  --timeout <sec>        Per-command timeout in seconds (default: 60)\n");
     write_stdout("  --simd [byte]          SIMD lane match byte for inspect (default: '/')\n");
     write_stdout("  --offset <N>           Base address offset for inspect hexdump (default: 0)\n\n");
@@ -94,7 +96,35 @@ fn handle_filecheck(file_arg: const u8[:], prefix_arg: const u8[:]) -> i32 {
     return 0;
 }
 
-fn run_lit_suite(target_path: const u8[:], verbose: bool, lit_cfg: const crap::LitConfig&) -> i32 {
+fn run_lit_suite(
+    target_path: const u8[:],
+    verbose:     bool,
+    list_only:   bool,
+    allow_empty: bool,
+    lit_cfg:     const crap::LitConfig&,
+) -> i32 {
+    if !file_exists(target_path) && !is_dir(target_path) {
+        write_stdout("Error: path does not exist: ");
+        write_stdout(target_path);
+        write_stdout("\n");
+        return 2;
+    }
+
+    if list_only {
+        if file_exists(target_path) && !is_dir(target_path) {
+            write_stdout(target_path);
+            write_stdout("\n");
+            return 0;
+        }
+        var listed: u8[>..] = [];
+        let lcount = lit::discover_test_files_filtered(target_path, lit_cfg.exclude_buf[..], listed);
+        if lcount == 0 {
+            return if allow_empty { 0 } else { 2 };
+        }
+        write_stdout(listed[..]);
+        return 0;
+    }
+
     write_stdout("=== Goose LIT Test Runner ===\n");
 
     if file_exists(target_path) && !is_dir(target_path) {
@@ -151,7 +181,7 @@ fn run_lit_suite(target_path: const u8[:], verbose: bool, lit_cfg: const crap::L
         write_stdout("No test files found in ");
         write_stdout(target_path);
         write_stdout("\n");
-        return 0;
+        return if allow_empty { 0 } else { 2 };
     }
 
     var passed_count:      i64 = 0;
@@ -258,7 +288,12 @@ fn main() {
 
     var custom_config: const u8[:] = "";
     for ci in all_args.len {
-        if all_args[ci] == "--config" && ci + 1 < all_args.len {
+        if all_args[ci] == "--config" {
+            if ci + 1 >= all_args.len {
+                write_stdout("Error: --config requires a file path\n");
+                sys_exit(2);
+                return;
+            }
             custom_config = all_args[ci + 1];
             break;
         }
@@ -269,11 +304,11 @@ fn main() {
     if all_args.len <= 1 {
         let cfg_tests = lit_cfg.tests_dir_buf[..];
         if cfg_tests.len > 0 && (is_dir(cfg_tests) || file_exists(cfg_tests)) {
-            let rc = run_lit_suite(cfg_tests, false, lit_cfg);
+            let rc = run_lit_suite(cfg_tests, false, false, false, lit_cfg);
             sys_exit(rc);
             return;
         } else if is_dir("tests") || file_exists("tests") {
-            let rc = run_lit_suite("tests", false, lit_cfg);
+            let rc = run_lit_suite("tests", false, false, false, lit_cfg);
             sys_exit(rc);
             return;
         }
@@ -288,7 +323,7 @@ fn main() {
         return;
     }
 
-    if first == "version" || first == "--version" || first == "-v" {
+    if first == "version" || first == "--version" || first == "-V" {
         write_stdout("goose-lit version ");
         write_stdout(crap::trim_ascii(LIT_VERSION_BYTES));
         write_stdout("\n");
@@ -298,7 +333,7 @@ fn main() {
     if first == "not" {
         guard all_args.len > 2 else {
             write_stdout("Error: not requires a command to run\n");
-            sys_exit(1);
+            sys_exit(2);
             return;
         }
         var cmd_str: u8[>..] = [];
@@ -330,15 +365,37 @@ fn main() {
         var idx:         i64         = 2;
         while idx < all_args.len {
             let a = all_args[idx];
-            if (a == "--prefix" || a == "-prefix") && idx + 1 < all_args.len {
+            if a == "--prefix" || a == "-prefix" {
+                guard idx + 1 < all_args.len else {
+                    write_stdout("Error: --prefix requires a prefix string\n");
+                    sys_exit(2);
+                    return;
+                }
                 crap::set_bounded(prefix_buf, all_args[idx + 1]);
                 idx++;
-            } else if a == "--config" && idx + 1 < all_args.len {
+            } else if a == "--config" {
                 idx++;
-            } else if !crap::slice_starts_with(a, "-") && file_target.len == 0 {
+            } else if crap::slice_starts_with(a, "-") {
+                write_stdout("Error: unknown option for filecheck: ");
+                write_stdout(a);
+                write_stdout("\n");
+                sys_exit(2);
+                return;
+            } else if file_target.len == 0 {
                 file_target = a;
+            } else {
+                write_stdout("Error: unexpected argument for filecheck: ");
+                write_stdout(a);
+                write_stdout("\n");
+                sys_exit(2);
+                return;
             }
             idx++;
+        }
+        guard file_target.len > 0 else {
+            write_stdout("Error: filecheck requires a test source file\n");
+            sys_exit(2);
+            return;
         }
         let rc = handle_filecheck(file_target, prefix_buf[..]);
         sys_exit(rc);
@@ -372,11 +429,29 @@ fn main() {
                     }
                     idx++;
                 }
-            } else if a == "--offset" && idx + 1 < all_args.len {
+            } else if a == "--offset" {
+                guard idx + 1 < all_args.len else {
+                    write_stdout("Error: --offset requires a numeric value\n");
+                    sys_exit(2);
+                    return;
+                }
                 let num, ok = crap::parse_i64_slice(all_args[idx + 1]);
-                if ok { offset = num; }
+                guard ok && num >= 0 else {
+                    write_stdout("Error: invalid --offset value\n");
+                    sys_exit(2);
+                    return;
+                }
+                offset = num;
                 idx++;
-            } else if !crap::slice_starts_with(a, "-") && target.len == 0 {
+            } else if a == "--config" {
+                idx++;
+            } else if crap::slice_starts_with(a, "-") {
+                write_stdout("Error: unknown option for inspect: ");
+                write_stdout(a);
+                write_stdout("\n");
+                sys_exit(2);
+                return;
+            } else if target.len == 0 {
                 target = a;
             }
             idx++;
@@ -389,41 +464,67 @@ fn main() {
     // Default mode: lit test runner over path or file
     var cli_target: const u8[:] = "";
     var verbose = false;
+    var list_only = false;
+    var allow_empty = false;
 
     var idx: i64 = 1;
     while idx < all_args.len {
         let a = all_args[idx];
         if a == "--verbose" || a == "-v" {
             verbose = true;
-        } else if a == "--timeout" && idx + 1 < all_args.len {
-            let t_val, ok = crap::parse_i64_slice(all_args[idx + 1]);
-            if ok && t_val > 0 {
-                lit_cfg.timeout_sec = t_val;
-                lit_cfg.has_timeout = true;
+        } else if a == "--list-tests" {
+            list_only = true;
+        } else if a == "--allow-empty" {
+            allow_empty = true;
+        } else if a == "--timeout" {
+            guard idx + 1 < all_args.len else {
+                write_stdout("Error: --timeout requires a positive integer in seconds\n");
+                sys_exit(2);
+                return;
             }
+            let t_val, ok = crap::parse_i64_slice(all_args[idx + 1]);
+            guard ok && t_val > 0 else {
+                write_stdout("Error: --timeout must be a positive integer\n");
+                sys_exit(2);
+                return;
+            }
+            lit_cfg.timeout_sec = t_val;
+            lit_cfg.has_timeout = true;
             idx++;
-        } else if a == "--config" && idx + 1 < all_args.len {
+        } else if a == "--config" {
             idx++;
-        } else if !crap::slice_starts_with(a, "-") && cli_target.len == 0 {
+        } else if crap::slice_starts_with(a, "-") {
+            write_stdout("Error: unknown option: ");
+            write_stdout(a);
+            write_stdout("\n");
+            sys_exit(2);
+            return;
+        } else if cli_target.len == 0 {
             cli_target = a;
+        } else {
+            write_stdout("Error: unexpected positional argument: ");
+            write_stdout(a);
+            write_stdout("\n");
+            sys_exit(2);
+            return;
         }
         idx++;
     }
 
     if cli_target.len > 0 {
-        let rc = run_lit_suite(cli_target, verbose, lit_cfg);
+        let rc = run_lit_suite(cli_target, verbose, list_only, allow_empty, lit_cfg);
         sys_exit(rc);
         return;
     }
 
     if lit_cfg.tests_dir_buf.len > 0 && (is_dir(lit_cfg.tests_dir_buf[..]) || file_exists(lit_cfg.tests_dir_buf[..])) {
-        let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose, lit_cfg);
+        let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose, list_only, allow_empty, lit_cfg);
         sys_exit(rc);
         return;
     }
 
     if is_dir("tests") || file_exists("tests") {
-        let rc = run_lit_suite("tests", verbose, lit_cfg);
+        let rc = run_lit_suite("tests", verbose, list_only, allow_empty, lit_cfg);
         sys_exit(rc);
         return;
     }

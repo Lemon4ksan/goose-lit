@@ -20,6 +20,11 @@
 #else
 #include <unistd.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <time.h>
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -118,13 +123,21 @@ GCRAP_WEAK int32_t crap_cov_dump(crap_bytes_ro path) {
     return (int32_t)crap_write_hits_to_file(cpath);
 }
 
+static volatile int32_t g_last_exec_timed_out = 0;
+
+GCRAP_WEAK int32_t crap_last_exec_timed_out(void) {
+    return g_last_exec_timed_out;
+}
+
 GCRAP_WEAK int32_t crap_setenv(crap_bytes_ro key, crap_bytes_ro val) {
     char ckey[512], cval[4096];
     crap_slice_to_cstr(key, ckey, sizeof(ckey));
     crap_slice_to_cstr(val, cval, sizeof(cval));
+    int has_sep = (strchr(cval, '/') != NULL || strchr(cval, '\\') != NULL);
 #ifdef _WIN32
     char abs_val[4096];
-    if (GetFullPathNameA(cval, sizeof(abs_val), abs_val, NULL) > 0) {
+    if (has_sep && GetFileAttributesA(cval) != INVALID_FILE_ATTRIBUTES &&
+        GetFullPathNameA(cval, sizeof(abs_val), abs_val, NULL) > 0) {
         SetEnvironmentVariableA(ckey, abs_val);
         _putenv_s(ckey, abs_val);
     } else {
@@ -133,7 +146,7 @@ GCRAP_WEAK int32_t crap_setenv(crap_bytes_ro key, crap_bytes_ro val) {
     }
 #else
     char abs_val[4096];
-    if (realpath(cval, abs_val) != NULL) {
+    if (has_sep && realpath(cval, abs_val) != NULL) {
         setenv(ckey, abs_val, 1);
     } else {
         setenv(ckey, cval, 1);
@@ -145,6 +158,7 @@ GCRAP_WEAK int32_t crap_setenv(crap_bytes_ro key, crap_bytes_ro val) {
 // Executes a shell command line and captures combined stdout and stderr into out_path.
 // Returns process exit code (0 on success, non-zero on failure, -1 on spawn error).
 GCRAP_WEAK int32_t crap_exec_to_file(crap_bytes_ro cmd, crap_bytes_ro out_path) {
+    g_last_exec_timed_out = 0;
     char c_cmd[8192];
     char c_out[4096];
     crap_slice_to_cstr(cmd, c_cmd, sizeof(c_cmd));
@@ -202,7 +216,95 @@ GCRAP_WEAK int32_t crap_exec_to_file(crap_bytes_ro cmd, crap_bytes_ro out_path) 
 #endif
 }
 
+#ifdef _WIN32
+static int32_t crap_win32_spawn_and_wait(wchar_t *w_cmd, const wchar_t *w_out, int32_t timeout_ms) {
+    SECURITY_ATTRIBUTES sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+
+    HANDLE hOut = CreateFileW(
+        w_out,
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        &sa,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (hOut == INVALID_HANDLE_VALUE) return -1;
+
+    HANDLE hJob = CreateJobObjectW(NULL, NULL);
+    if (hJob != NULL) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli;
+        memset(&jeli, 0, sizeof(jeli));
+        jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
+    }
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = hOut;
+    si.hStdError = hOut;
+    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+
+    if (!CreateProcessW(NULL, w_cmd, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+        if (hJob != NULL) CloseHandle(hJob);
+        CloseHandle(hOut);
+        return -1;
+    }
+
+    if (hJob != NULL) {
+        AssignProcessToJobObject(hJob, pi.hProcess);
+    }
+    ResumeThread(pi.hThread);
+
+    DWORD wait_ms = (timeout_ms > 0) ? (DWORD)timeout_ms : INFINITE;
+    DWORD wait_res = WaitForSingleObject(pi.hProcess, wait_ms);
+    DWORD exit_code = 1;
+    if (wait_res == WAIT_TIMEOUT) {
+        g_last_exec_timed_out = 1;
+        if (hJob != NULL) {
+            TerminateJobObject(hJob, 124);
+        }
+        TerminateProcess(pi.hProcess, 124);
+        WaitForSingleObject(pi.hProcess, 1000);
+        exit_code = 124;
+    } else {
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    if (hJob != NULL) {
+        CloseHandle(hJob);
+    }
+    CloseHandle(hOut);
+    return (int32_t)exit_code;
+}
+
+static size_t crap_append_win_quoted_arg(char *dst, size_t cap, size_t pos, const char *arg) {
+    if (pos + 2 >= cap) return pos;
+    if (pos > 0) dst[pos++] = ' ';
+    dst[pos++] = '"';
+    for (size_t i = 0; arg[i] != '\0' && pos + 2 < cap; i++) {
+        if (arg[i] == '"') {
+            if (pos + 3 >= cap) break;
+            dst[pos++] = '\\';
+        }
+        dst[pos++] = arg[i];
+    }
+    dst[pos++] = '"';
+    dst[pos] = '\0';
+    return pos;
+}
+#endif
+
 GCRAP_WEAK int32_t crap_exec_to_file_timeout(crap_bytes_ro cmd, crap_bytes_ro out_path, int32_t timeout_ms) {
+    g_last_exec_timed_out = 0;
     if (timeout_ms <= 0) {
         return crap_exec_to_file(cmd, out_path);
     }
@@ -223,53 +325,147 @@ GCRAP_WEAK int32_t crap_exec_to_file_timeout(crap_bytes_ro cmd, crap_bytes_ro ou
     wchar_t w_out[4096];
     if (MultiByteToWideChar(CP_UTF8, 0, full_cmd, -1, w_cmd, 8256) <= 0) return -1;
     if (MultiByteToWideChar(CP_UTF8, 0, c_out, -1, w_out, 4096) <= 0) return -1;
+    return crap_win32_spawn_and_wait(w_cmd, w_out, timeout_ms);
+#else
+    int out_fd = open(c_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out_fd < 0) return -1;
 
-    SECURITY_ATTRIBUTES sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.nLength = sizeof(sa);
-    sa.bInheritHandle = TRUE;
-
-    HANDLE hOut = CreateFileW(
-        w_out,
-        GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        &sa,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
-    if (hOut == INVALID_HANDLE_VALUE) return -1;
-
-    STARTUPINFOW si;
-    PROCESS_INFORMATION pi;
-    memset(&si, 0, sizeof(si));
-    memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = hOut;
-    si.hStdError = hOut;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-
-    if (!CreateProcessW(NULL, w_cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
-        CloseHandle(hOut);
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(out_fd);
         return -1;
     }
-
-    DWORD wait_res = WaitForSingleObject(pi.hProcess, (DWORD)timeout_ms);
-    DWORD exit_code = 1;
-    if (wait_res == WAIT_TIMEOUT) {
-        TerminateProcess(pi.hProcess, 124);
-        WaitForSingleObject(pi.hProcess, 1000);
-        exit_code = 124;
-    } else {
-        GetExitCodeProcess(pi.hProcess, &exit_code);
+    if (pid == 0) {
+        setpgid(0, 0);
+        dup2(out_fd, STDOUT_FILENO);
+        dup2(out_fd, STDERR_FILENO);
+        close(out_fd);
+        execl("/bin/sh", "sh", "-c", c_cmd, (char *)NULL);
+        _exit(127);
     }
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    CloseHandle(hOut);
-    return (int32_t)exit_code;
+    close(out_fd);
+    setpgid(pid, pid);
+
+    struct timespec start_ts, now_ts, sleep_ts;
+    clock_gettime(CLOCK_MONOTONIC, &start_ts);
+    sleep_ts.tv_sec = 0;
+    sleep_ts.tv_nsec = 5 * 1000 * 1000;
+
+    int status = 0;
+    for (;;) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) {
+            if (WIFEXITED(status)) return (int32_t)WEXITSTATUS(status);
+            if (WIFSIGNALED(status)) return (int32_t)(128 + WTERMSIG(status));
+            return (int32_t)status;
+        }
+        if (w < 0) return -1;
+
+        clock_gettime(CLOCK_MONOTONIC, &now_ts);
+        int64_t elapsed_ms = (int64_t)(now_ts.tv_sec - start_ts.tv_sec) * 1000LL +
+                             (int64_t)(now_ts.tv_nsec - start_ts.tv_nsec) / 1000000LL;
+        if (elapsed_ms >= (int64_t)timeout_ms) {
+            g_last_exec_timed_out = 1;
+            kill(-pid, SIGTERM);
+            nanosleep(&sleep_ts, NULL);
+            kill(-pid, SIGKILL);
+            waitpid(pid, &status, 0);
+            return 124;
+        }
+        nanosleep(&sleep_ts, NULL);
+    }
+#endif
+}
+
+// Executes a program directly with up to 3 arguments without invoking a shell.
+GCRAP_WEAK int32_t crap_exec_argv_to_file(
+    crap_bytes_ro prog,
+    crap_bytes_ro arg1,
+    crap_bytes_ro arg2,
+    crap_bytes_ro arg3,
+    crap_bytes_ro out_path,
+    int32_t timeout_ms
+) {
+    g_last_exec_timed_out = 0;
+    char c_prog[1024], c_arg1[1024], c_arg2[1024], c_arg3[4096], c_out[4096];
+    crap_slice_to_cstr(prog, c_prog, sizeof(c_prog));
+    crap_slice_to_cstr(arg1, c_arg1, sizeof(c_arg1));
+    crap_slice_to_cstr(arg2, c_arg2, sizeof(c_arg2));
+    crap_slice_to_cstr(arg3, c_arg3, sizeof(c_arg3));
+    crap_slice_to_cstr(out_path, c_out, sizeof(c_out));
+    if (!c_prog[0] || !c_out[0]) return -1;
+
+#ifdef _WIN32
+    char cmd_line[8192];
+    cmd_line[0] = '\0';
+    size_t pos = 0;
+    pos = crap_append_win_quoted_arg(cmd_line, sizeof(cmd_line), pos, c_prog);
+    if (c_arg1[0]) pos = crap_append_win_quoted_arg(cmd_line, sizeof(cmd_line), pos, c_arg1);
+    if (c_arg2[0]) pos = crap_append_win_quoted_arg(cmd_line, sizeof(cmd_line), pos, c_arg2);
+    if (c_arg3[0]) pos = crap_append_win_quoted_arg(cmd_line, sizeof(cmd_line), pos, c_arg3);
+
+    wchar_t w_cmd[8192];
+    wchar_t w_out[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, cmd_line, -1, w_cmd, 8192) <= 0) return -1;
+    if (MultiByteToWideChar(CP_UTF8, 0, c_out, -1, w_out, 4096) <= 0) return -1;
+    return crap_win32_spawn_and_wait(w_cmd, w_out, timeout_ms);
 #else
-    return crap_exec_to_file(cmd, out_path);
+    int out_fd = open(c_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out_fd < 0) return -1;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(out_fd);
+        return -1;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        dup2(out_fd, STDOUT_FILENO);
+        dup2(out_fd, STDERR_FILENO);
+        close(out_fd);
+        char *argv[6];
+        int argc = 0;
+        argv[argc++] = c_prog;
+        if (c_arg1[0]) argv[argc++] = c_arg1;
+        if (c_arg2[0]) argv[argc++] = c_arg2;
+        if (c_arg3[0]) argv[argc++] = c_arg3;
+        argv[argc] = NULL;
+        execvp(c_prog, argv);
+        _exit(127);
+    }
+    close(out_fd);
+    setpgid(pid, pid);
+
+    struct timespec start_ts, now_ts, sleep_ts;
+    clock_gettime(CLOCK_MONOTONIC, &start_ts);
+    sleep_ts.tv_sec = 0;
+    sleep_ts.tv_nsec = 5 * 1000 * 1000;
+
+    int status = 0;
+    for (;;) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) {
+            if (WIFEXITED(status)) return (int32_t)WEXITSTATUS(status);
+            if (WIFSIGNALED(status)) return (int32_t)(128 + WTERMSIG(status));
+            return (int32_t)status;
+        }
+        if (w < 0) return -1;
+
+        if (timeout_ms > 0) {
+            clock_gettime(CLOCK_MONOTONIC, &now_ts);
+            int64_t elapsed_ms = (int64_t)(now_ts.tv_sec - start_ts.tv_sec) * 1000LL +
+                                 (int64_t)(now_ts.tv_nsec - start_ts.tv_nsec) / 1000000LL;
+            if (elapsed_ms >= (int64_t)timeout_ms) {
+                g_last_exec_timed_out = 1;
+                kill(-pid, SIGTERM);
+                nanosleep(&sleep_ts, NULL);
+                kill(-pid, SIGKILL);
+                waitpid(pid, &status, 0);
+                return 124;
+            }
+        }
+        nanosleep(&sleep_ts, NULL);
+    }
 #endif
 }
 
@@ -284,6 +480,98 @@ GCRAP_WEAK int32_t crap_file_delete(crap_bytes_ro path) {
     return DeleteFileW(wpath) ? 0 : -1;
 #else
     return unlink(cpath);
+#endif
+}
+
+#ifdef _WIN32
+static int crap_win32_remove_tree_w(const wchar_t *wpath) {
+    DWORD attrs = GetFileAttributesW(wpath);
+    if (attrs == INVALID_FILE_ATTRIBUTES) return -1;
+    if (!(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        return DeleteFileW(wpath) ? 0 : -1;
+    }
+    wchar_t search_pat[4096];
+    _snwprintf(search_pat, 4096, L"%s\\*", wpath);
+    WIN32_FIND_DATAW fd;
+    HANDLE hFind = FindFirstFileW(search_pat, &fd);
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+            wchar_t child[4096];
+            _snwprintf(child, 4096, L"%s\\%s", wpath, fd.cFileName);
+            crap_win32_remove_tree_w(child);
+        } while (FindNextFileW(hFind, &fd));
+        FindClose(hFind);
+    }
+    return RemoveDirectoryW(wpath) ? 0 : -1;
+}
+#else
+static int crap_posix_remove_tree(const char *cpath) {
+    struct stat st;
+    if (lstat(cpath, &st) != 0) return -1;
+    if (!S_ISDIR(st.st_mode)) {
+        return unlink(cpath);
+    }
+    DIR *d = opendir(cpath);
+    if (d) {
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
+            char child[4096];
+            snprintf(child, sizeof(child), "%s/%s", cpath, ent->d_name);
+            crap_posix_remove_tree(child);
+        }
+        closedir(d);
+    }
+    return rmdir(cpath);
+}
+#endif
+
+GCRAP_WEAK int32_t crap_remove_tree(crap_bytes_ro path) {
+    char cpath[4096];
+    crap_slice_to_cstr(path, cpath, sizeof(cpath));
+    if (!cpath[0]) return -1;
+#ifdef _WIN32
+    wchar_t wpath[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, cpath, -1, wpath, 4096) <= 0) return -1;
+    return (int32_t)crap_win32_remove_tree_w(wpath);
+#else
+    return (int32_t)crap_posix_remove_tree(cpath);
+#endif
+}
+
+// Checks whether an executable exists on PATH or as an explicit path.
+GCRAP_WEAK int32_t crap_has_executable(crap_bytes_ro prog) {
+    char cprog[1024];
+    crap_slice_to_cstr(prog, cprog, sizeof(cprog));
+    if (!cprog[0]) return 0;
+#ifdef _WIN32
+    char out_buf[4096];
+    if (SearchPathA(NULL, cprog, ".exe", sizeof(out_buf), out_buf, NULL) > 0) return 1;
+    if (SearchPathA(NULL, cprog, ".cmd", sizeof(out_buf), out_buf, NULL) > 0) return 1;
+    if (SearchPathA(NULL, cprog, ".bat", sizeof(out_buf), out_buf, NULL) > 0) return 1;
+    return 0;
+#else
+    if (strchr(cprog, '/') != NULL) {
+        return access(cprog, X_OK) == 0 ? 1 : 0;
+    }
+    const char *path_env = getenv("PATH");
+    if (!path_env) return 0;
+    const char *p = path_env;
+    while (*p) {
+        const char *colon = strchr(p, ':');
+        size_t dir_len = colon ? (size_t)(colon - p) : strlen(p);
+        if (dir_len > 0 && dir_len + 1 + strlen(cprog) < 4096) {
+            char cand[4096];
+            memcpy(cand, p, dir_len);
+            cand[dir_len] = '/';
+            strcpy(cand + dir_len + 1, cprog);
+            if (access(cand, X_OK) == 0) return 1;
+        }
+        if (!colon) break;
+        p = colon + 1;
+    }
+    return 0;
 #endif
 }
 

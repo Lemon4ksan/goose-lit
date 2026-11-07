@@ -160,11 +160,15 @@ fn parse_f64_slice(s: const u8[:]) -> f64, bool {
     // Parse fractional part
     if idx < t.len && t[idx] == '.' {
         idx++;
-        var frac_val: f64 = 0.0;
-        var frac_div: f64 = 1.0;
+        var frac_val:    f64 = 0.0;
+        var frac_div:    f64 = 1.0;
+        var frac_digits: i64 = 0;
         while idx < t.len && is_ascii_digit(t[idx]) {
-            frac_val = frac_val * 10.0 + (t[idx] - '0');
-            frac_div *= 10.0;
+            if frac_digits < 18 {
+                frac_val = frac_val * 10.0 + (t[idx] - '0');
+                frac_div *= 10.0;
+                frac_digits++;
+            }
             digits_seen++;
             idx++;
         }
@@ -187,25 +191,38 @@ fn parse_f64_slice(s: const u8[:]) -> f64, bool {
         guard idx < t.len && is_ascii_digit(t[idx]) else { return 0.0, false; }
         var exp_val: i64 = 0;
         while idx < t.len && is_ascii_digit(t[idx]) {
-            exp_val = exp_val * 10 + (t[idx] - '0');
+            if exp_val < 10000 {
+                exp_val = exp_val * 10 + (t[idx] - '0');
+            }
             idx++;
         }
-        var exp_scale: f64 = 1.0;
-        var p:         i64 = 0;
-        while p < exp_val {
-            exp_scale *= 10.0;
-            p++;
-        }
-        if exp_neg {
-            val /= exp_scale;
-        } else {
-            val *= exp_scale;
+        if val != 0.0 {
+            var p: i64 = exp_val;
+            if exp_neg {
+                while p >= 16 && val > 0.0 {
+                    val /= 1e16;
+                    p -= 16;
+                }
+                while p > 0 && val > 0.0 {
+                    val /= 10.0;
+                    p--;
+                }
+            } else {
+                while p >= 16 {
+                    val *= 1e16;
+                    p -= 16;
+                }
+                while p > 0 {
+                    val *= 10.0;
+                    p--;
+                }
+            }
         }
     }
 
     guard idx == t.len else { return 0.0, false; }
 
-    if neg {
+    if neg && val != 0.0 {
         val = -val;
     }
     return val, true;
@@ -243,17 +260,22 @@ fn append_f64_1<B>(out: B&, val: f64) {
         out.append("0.0");
         return;
     }
+    var neg = false;
     var v = val;
     if v < 0.0 {
-        out.push('-');
+        neg = true;
         v = -v;
     }
     if v >= 1e17 {
+        if neg { out.push('-'); }
         append_u64(out, 99999999999999999);
         out.append(".0");
         return;
     }
     let scaled = ((v * 10.0) + 0.5) as! u64;
+    if neg && scaled > 0 {
+        out.push('-');
+    }
     let whole = scaled / 10;
     let frac = scaled % 10;
     append_u64(out, whole);
@@ -266,23 +288,52 @@ fn append_f64_2<B>(out: B&, val: f64) {
         out.append("0.00");
         return;
     }
+    var neg = false;
     var v = val;
     if v < 0.0 {
-        out.push('-');
+        neg = true;
         v = -v;
     }
     if v >= 1e16 {
+        if neg { out.push('-'); }
         append_u64(out, 9999999999999999);
         out.append(".00");
         return;
     }
     let scaled = ((v * 100.0) + 0.5) as! u64;
+    if neg && scaled > 0 {
+        out.push('-');
+    }
     let whole = scaled / 100;
     let frac = scaled % 100;
     append_u64(out, whole);
     out.push('.');
     out.push(('0' + (frac / 10)) as u8);
     out.push(('0' + (frac % 10)) as u8);
+}
+
+fn append_json_escaped(out: u8[>..]&, s: const u8[:]) {
+    for c in s {
+        if c == '"' {
+            out.append("\\\"");
+        } else if c == '\\' {
+            out.append("\\\\");
+        } else if c == '\n' {
+            out.append("\\n");
+        } else if c == '\r' {
+            out.append("\\r");
+        } else if c == '\t' {
+            out.append("\\t");
+        } else if c < 32 {
+            out.append("\\u00");
+            let hi = (c >> 4) & 0xF;
+            let lo = c & 0xF;
+            out.push(if hi < 10 { '0' + hi } else { 'a' + (hi - 10) });
+            out.push(if lo < 10 { '0' + lo } else { 'a' + (lo - 10) });
+        } else {
+            out.push(c);
+        }
+    }
 }
 
 fn append_padded_right<B>(out: B&, s: const u8[:], width: i64) {
@@ -304,7 +355,7 @@ fn append_padded_left<B>(out: B&, s: const u8[:], width: i64) {
 }
 
 // Normalizes file paths so mixed Windows/POSIX separators and casing match identically.
-// Strips redundant leading `./` or `.\\` segments.
+// Strips redundant leading `./` or `.\\` segments, collapses `//` and `/./`.
 fn normalize_path(path: const u8[:], out: u8[>..]&) {
     var t = trim_ascii(path);
     // Strip UTF-8 BOM (0xEF, 0xBB, 0xBF) if present
@@ -313,14 +364,32 @@ fn normalize_path(path: const u8[:], out: u8[>..]&) {
     }
     while t.len >= 2 && t[0] == '.' && (t[1] == '/' || t[1] == '\\') {
         t = t[2..];
-    }
-    for i in t.len {
-        let c = t[i];
-        if c == '\\' {
-            out.push('/');
-        } else {
-            out.push(ascii_lower(c));
+        while t.len > 0 && (t[0] == '/' || t[0] == '\\') {
+            t = t[1..];
         }
+    }
+    let base_len = out.len;
+    var i: i64 = 0;
+    while i < t.len {
+        let c = if t[i] == '\\' { '/' } else { ascii_lower(t[i]) };
+        if c == '/' {
+            if out.len > base_len && out[out.len - 1] == '/' {
+                i++;
+                continue;
+            }
+            if i + 1 < t.len && t[i + 1] == '.' {
+                if i + 2 == t.len {
+                    i += 2;
+                    continue;
+                }
+                if t[i + 2] == '/' || t[i + 2] == '\\' {
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+        i++;
     }
 }
 
@@ -353,7 +422,7 @@ fn to_relative_path(path: const u8[:], root: const u8[:], out: u8[>..]&) {
         r = r[..r.len - 1];
     }
 
-    if r.len > 0 && r != "." && slice_starts_with(p, r) {
+    if r.len > 0 && r != "." && slice_starts_with(p, r) && (p.len == r.len || p[r.len] == '/') {
         p = p[r.len..];
         while p.len > 0 && p[0] == '/' {
             p = p[1..];
@@ -389,6 +458,10 @@ fn paths_match(a: const u8[:], b: const u8[:]) -> bool {
     }
 
     // Case 2: cross-environment absolute paths sharing common repo suffix
+    let a_abs = sa[0] == '/' || (sa.len >= 3 && sa[1] == ':' && sa[2] == '/');
+    let b_abs = sb[0] == '/' || (sb.len >= 3 && sb[1] == ':' && sb[2] == '/');
+    guard a_abs && b_abs else { return false; }
+
     var common_len: i64 = 0;
     while common_len < sa.len && common_len < sb.len {
         let ca = sa[sa.len - 1 - common_len];

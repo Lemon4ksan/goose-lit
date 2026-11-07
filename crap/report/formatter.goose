@@ -8,6 +8,13 @@ import std;
 import sys.bytes;
 import crap.ast.model;
 
+fn safe_sort_score(score: f64) -> f64 {
+    if score != score {
+        return -1.0;
+    }
+    return score;
+}
+
 // Sorts function indices descending by G-CRAP score.
 fn sort_functions_by_gcrap(functions: const FunctionInfo[:], order: i32[>..]&) {
     order.clear();
@@ -20,12 +27,12 @@ fn sort_functions_by_gcrap(functions: const FunctionInfo[:], order: i32[>..]&) {
     while i < order.len {
         let key_idx = order[i];
         guard key_idx >= 0 && key_idx < functions.len else { i++; continue; }
-        let key_score = functions[key_idx].g_crap;
+        let key_score = safe_sort_score(functions[key_idx].g_crap);
         var j: i64 = i - 1;
         while j >= 0 {
             let cur_idx = order[j];
             guard cur_idx >= 0 && cur_idx < functions.len else { break; }
-            if functions[cur_idx].g_crap >= key_score {
+            if safe_sort_score(functions[cur_idx].g_crap) >= key_score {
                 break;
             }
             guard j + 1 < order.len else { break; }
@@ -97,19 +104,19 @@ fn render_terminal_report(
         append_padded_left(out, cov_buf, 6);
 
         out.append(" | ");
-        var bce_buf: u8[..16] = [];
+        var bce_buf: u8[..32] = [];
         append_i64(bce_buf, fn_info.uncovered_bce_keep);
         bce_buf.push('/');
         append_i64(bce_buf, fn_info.total_bce_keep);
         append_padded_left(out, bce_buf, 8);
 
         out.append(" | ");
-        var crap_buf: u8[..16] = [];
+        var crap_buf: u8[..32] = [];
         append_f64_1(crap_buf, fn_info.classic_crap);
         append_padded_left(out, crap_buf, 8);
 
         out.append(" | ");
-        var gcrap_buf: u8[..16] = [];
+        var gcrap_buf: u8[..32] = [];
         append_f64_1(gcrap_buf, fn_info.g_crap);
         append_padded_left(out, gcrap_buf, 8);
 
@@ -210,6 +217,7 @@ fn render_markdown_report(
     for oi in order.len {
         let fi: i64 = order[oi];
         let fn_info = functions[fi];
+        if fn_info.ignored { continue; }
         if fn_info.g_crap < 1.0 { continue; }
 
         let name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
@@ -256,19 +264,27 @@ fn render_json_report(
 ) {
     out.append("{\n  \"functions\": [\n");
     var nfile: u8[>..] = [];
+    var first_fn = true;
 
     for fi in functions.len {
         let fn_info = functions[fi];
+        if fn_info.ignored { continue; }
+
+        if !first_fn {
+            out.append(",\n");
+        }
+        first_fn = false;
+
         let name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
         let file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
 
         out.append("    {\n");
         out.append("      \"name\": \"");
-        out.append(name);
+        append_json_escaped(out, name);
         out.append("\",\n      \"file\": \"");
         nfile.clear();
         normalize_path(file, nfile);
-        out.append(nfile);
+        append_json_escaped(out, nfile);
         out.append("\",\n      \"line\": ");
         append_i64(out, fn_info.start_line);
         out.append(",\n      \"cyclomatic_cc\": ");
@@ -302,9 +318,8 @@ fn render_json_report(
         out.append(",\n      \"archetype\": \"");
         out.append(archetype_short(fn_info.archetype));
         out.append("\"\n    }");
-        if fi + 1 < functions.len {
-            out.push(',');
-        }
+    }
+    if !first_fn {
         out.push('\n');
     }
 
@@ -444,7 +459,7 @@ fn render_sarif_report(
                 out.append(" (");
                 out.append(branch_kind_name(b.kind));
                 out.append(") in '");
-                out.append(name);
+                append_json_escaped(out, name);
                 out.append("' with G-CRAP score ");
                 append_f64_1(out, fn_info.g_crap);
                 if b.bce_keep > 0 {
@@ -455,7 +470,7 @@ fn render_sarif_report(
                 out.append("\"\n          },\n");
                 out.append("          \"locations\": [\n            {\n              \"physicalLocation\": {\n");
                 out.append("                \"artifactLocation\": { \"uri\": \"");
-                out.append(nfile);
+                append_json_escaped(out, nfile);
                 out.append("\" },\n                \"region\": { \"startLine\": ");
                 append_i64(out, b.start_line);
                 out.append(", \"endLine\": ");

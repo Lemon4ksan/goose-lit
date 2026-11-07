@@ -11,13 +11,22 @@ import sys.bytes;
 import crap.ast.model;
 
 struct BaselineEntry {
-    file_buf:           u8[..256] = [],
-    name_buf:           u8[..128] = [],
-    start_line:         i32       = 0,
-    g_crap:             f64       = 0.0,
-    uncovered_bce_keep: i32       = 0,
-    cov_branch:         f64       = 0.0,
-    consumed:           bool      = false,
+    file_buf:           u8[..1024] = [],
+    name_buf:           u8[..256]  = [],
+    has_file:           bool       = false,
+    start_line:         i32        = 0,
+    g_crap:             f64        = 0.0,
+    uncovered_bce_keep: i32        = 0,
+    cov_branch:         f64        = 0.0,
+    consumed:           bool       = false,
+}
+
+fn round_f64_2(v: f64) -> f64 {
+    if v != v || v <= 0.0 {
+        return 0.0;
+    }
+    let scaled = ((v * 100.0) + 0.5) as! i64;
+    return scaled / 100.0;
 }
 
 // Saves current scan as a baseline snapshot.
@@ -117,20 +126,23 @@ fn check_ratchet_gate(
                             if sp5 > 0 && sp5 + 1 <= rest4.len {
                                 let rest5 = trim_ascii(rest4[sp5 + 1..]);
                                 let cv, ok_c = parse_f64_slice(rest5);
-                                if ok_c { cov_val = cv; }
+                                if ok_c && cv == cv { cov_val = cv; }
                             }
-                            var entry = BaselineEntry {
-                                file_buf:           [],
-                                name_buf:           [],
-                                start_line:         if ok_l { line_val as i32 } else { 0 },
-                                g_crap:             if ok_g { gcrap_val } else { 0.0 },
-                                uncovered_bce_keep: if ok_b { bce_val as i32 } else { 0 },
-                                cov_branch:         cov_val,
-                                consumed:           false,
-                            };
-                            set_bounded(entry.file_buf, file_part);
-                            set_bounded(entry.name_buf, name_part);
-                            entries.push(entry);
+                            if ok_l && ok_g && ok_b && gcrap_val == gcrap_val {
+                                var entry = BaselineEntry {
+                                    file_buf:           [],
+                                    name_buf:           [],
+                                    has_file:           true,
+                                    start_line:         line_val as i32,
+                                    g_crap:             gcrap_val,
+                                    uncovered_bce_keep: bce_val as i32,
+                                    cov_branch:         cov_val,
+                                    consumed:           false,
+                                };
+                                if set_bounded(entry.file_buf, file_part) && set_bounded(entry.name_buf, name_part) {
+                                    entries.push(entry);
+                                }
+                            }
                         }
                     }
                 }
@@ -153,19 +165,23 @@ fn check_ratchet_gate(
                     if sp3 > 0 && sp3 + 1 <= rest2.len {
                         let rest3 = trim_ascii(rest2[sp3 + 1..]);
                         let cv, ok_c = parse_f64_slice(rest3);
-                        if ok_c { cov_val = cv; }
+                        if ok_c && cv == cv { cov_val = cv; }
                     }
-                    var entry = BaselineEntry {
-                        file_buf:           [],
-                        name_buf:           [],
-                        start_line:         0,
-                        g_crap:             if ok_g { gcrap_val } else { 0.0 },
-                        uncovered_bce_keep: if ok_b { bce_val as i32 } else { 0 },
-                        cov_branch:         cov_val,
-                        consumed:           false,
-                    };
-                    set_bounded(entry.name_buf, name_part);
-                    entries.push(entry);
+                    if ok_g && ok_b && gcrap_val == gcrap_val {
+                        var entry = BaselineEntry {
+                            file_buf:           [],
+                            name_buf:           [],
+                            has_file:           false,
+                            start_line:         0,
+                            g_crap:             gcrap_val,
+                            uncovered_bce_keep: bce_val as i32,
+                            cov_branch:         cov_val,
+                            consumed:           false,
+                        };
+                        if set_bounded(entry.name_buf, name_part) {
+                            entries.push(entry);
+                        }
+                    }
                 }
             }
         }
@@ -186,7 +202,7 @@ fn check_ratchet_gate(
         // Priority 1: exact file + start_line + name match
         for ei in entries.len {
             if entries[ei].consumed { continue; }
-            let file_match = entries[ei].file_buf.len == 0 || paths_match(cur_file, entries[ei].file_buf[..]);
+            let file_match = !entries[ei].has_file || (entries[ei].file_buf.len > 0 && paths_match(cur_file, entries[ei].file_buf[..]));
             if file_match && entries[ei].name_buf == cur_name && entries[ei].start_line == fn_info.start_line {
                 found_idx = ei;
                 break;
@@ -196,7 +212,7 @@ fn check_ratchet_gate(
         if found_idx < 0 {
             for ei in entries.len {
                 if entries[ei].consumed { continue; }
-                let file_match = entries[ei].file_buf.len == 0 || paths_match(cur_file, entries[ei].file_buf[..]);
+                let file_match = !entries[ei].has_file || (entries[ei].file_buf.len > 0 && paths_match(cur_file, entries[ei].file_buf[..]));
                 if file_match && entries[ei].name_buf == cur_name {
                     found_idx = ei;
                     break;
@@ -208,6 +224,7 @@ fn check_ratchet_gate(
             entries[found_idx].consumed = true;
             let prev_bce = entries[found_idx].uncovered_bce_keep;
             let prev_gcrap = entries[found_idx].g_crap;
+            let cur_gcrap_cmp = round_f64_2(fn_info.g_crap);
 
             if fn_info.uncovered_bce_keep > prev_bce {
                 violations++;
@@ -218,7 +235,7 @@ fn check_ratchet_gate(
                 out.append(" to ");
                 append_i64(out, fn_info.uncovered_bce_keep);
                 out.append("!\n");
-            } else if fn_info.g_crap > prev_gcrap + delta_threshold && fn_info.cov_branch < 0.99 {
+            } else if cur_gcrap_cmp > prev_gcrap + delta_threshold && fn_info.cov_branch < 0.99 {
                 violations++;
                 out.append("[VIOLATION] Function `");
                 out.append(cur_name);
@@ -268,6 +285,11 @@ fn is_grandfathered_in_baseline(
     let is_v2 = slice_starts_with(content, "# goose-crap baseline v2");
     let cur_name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
     let cur_file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
+    let cur_gcrap_cmp = round_f64_2(fn_info.g_crap);
+
+    var fallback_matched = false;
+    var fallback_ok = false;
+    var same_name_count: i32 = 0;
 
     var line_start: i64 = 0;
     let n = content.len;
@@ -290,6 +312,7 @@ fn is_grandfathered_in_baseline(
             let rest1 = trim_ascii(raw[sp1 + 1..]);
             let sp2 = slice_index_of_byte(rest1, ' ');
             guard sp2 > 0 && sp2 < rest1.len else { continue; }
+            let line_part = rest1[..sp2];
             let rest2 = trim_ascii(rest1[sp2 + 1..]);
             let sp3 = slice_index_of_byte(rest2, ' ');
             guard sp3 > 0 && sp3 < rest2.len else { continue; }
@@ -303,16 +326,48 @@ fn is_grandfathered_in_baseline(
             let bce_part = if sp5 > 0 && sp5 <= rest4.len { rest4[..sp5] } else { rest4 };
 
             if name_part == cur_name && paths_match(cur_file, file_part) {
+                let line_val, ok_l = parse_i64_slice(line_part);
                 let gcrap_val, ok_g = parse_f64_slice(gcrap_part);
                 let bce_val, ok_b = parse_i64_slice(bce_part);
-                if ok_g && ok_b {
+                if ok_l && ok_g && ok_b && gcrap_val == gcrap_val {
+                    same_name_count++;
+                    let row_ok = fn_info.uncovered_bce_keep <= (bce_val as i32) &&
+                        (cur_gcrap_cmp <= gcrap_val + delta_threshold || fn_info.cov_branch >= 0.99);
+                    if (line_val as i32) == fn_info.start_line {
+                        return row_ok;
+                    }
+                    if !fallback_matched {
+                        fallback_matched = true;
+                        fallback_ok = row_ok;
+                    }
+                }
+            }
+        } else {
+            let sp1 = slice_index_of_byte(raw, ' ');
+            guard sp1 > 0 && sp1 < raw.len else { continue; }
+            let name_part = raw[..sp1];
+            let rest1 = trim_ascii(raw[sp1 + 1..]);
+            let sp2 = slice_index_of_byte(rest1, ' ');
+            guard sp2 > 0 && sp2 < rest1.len else { continue; }
+            let gcrap_part = rest1[..sp2];
+            let rest2 = trim_ascii(rest1[sp2 + 1..]);
+            let sp3 = slice_index_of_byte(rest2, ' ');
+            let bce_part = if sp3 > 0 && sp3 <= rest2.len { rest2[..sp3] } else { rest2 };
+
+            if name_part == cur_name {
+                let gcrap_val, ok_g = parse_f64_slice(gcrap_part);
+                let bce_val, ok_b = parse_i64_slice(bce_part);
+                if ok_g && ok_b && gcrap_val == gcrap_val {
                     if fn_info.uncovered_bce_keep <= (bce_val as i32) &&
-                       (fn_info.g_crap <= gcrap_val + delta_threshold || fn_info.cov_branch >= 0.99) {
+                       (cur_gcrap_cmp <= gcrap_val + delta_threshold || fn_info.cov_branch >= 0.99) {
                         return true;
                     }
                 }
             }
         }
+    }
+    if is_v2 && fallback_matched && same_name_count == 1 {
+        return fallback_ok;
     }
     return false;
 }

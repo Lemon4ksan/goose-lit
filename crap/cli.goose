@@ -17,13 +17,27 @@ import crap.report.formatter;
 import crap.report.ratchet;
 import sys.config;
 
+fn fnv1a_hash_bytes(s: const u8[:]) -> u64 {
+    var h: u64 = 14695981039346656037;
+    for b in s {
+        h = (h ^ b) * 1099511628211;
+    }
+    return h;
+}
+
+fn is_valid_format_mode(fmt: const u8[:]) -> bool {
+    return fmt == "table" || fmt == "md" || fmt == "markdown" ||
+           fmt == "json" || fmt == "gcc" || fmt == "sarif";
+}
+
 fn print_crap_usage() {
     write_stdout("Usage: goose-lit crap <path|file.goose> [options]\n");
     write_stdout("       goose-lit gate <path|file.goose> [ceiling] [options]\n\n");
     write_stdout("Goose Change Risk Anti-Pattern (G-CRAP) and Safety Risk Radar.\n\n");
     write_stdout("Analysis & Execution Options:\n");
     write_stdout("  --gate [val]            Enforce G-CRAP risk gate ceiling (default 25.0, exits with 1 on violation)\n");
-    write_stdout("  --bce-lines [file]      Import pre-captured goose --bce-lines output or auto-run\n");
+    write_stdout("  --bce-lines [file]      Import pre-captured goose --bce-lines output or auto-run (enabled by default)\n");
+    write_stdout("  --no-bce                Disable automatic goose --bce-lines compiler bridge\n");
     write_stdout("  --specs [file]          Import pre-captured goose --specs output or auto-run\n");
     write_stdout("  --cov <val|file>        Set simulated coverage (0.0..1.0) or load .gcrap-cov profile\n");
     write_stdout("  --lcov <file.info>      Load LCOV tracefile\n");
@@ -65,7 +79,8 @@ fn run_crap_cli() -> i32 {
     var target_paths_blob: u8[>..] = [];
     var explain_mode = false;
     var bce_file: const u8[:] = "";
-    var auto_bce = false;
+    var auto_bce = if lit_cfg.has_bce { lit_cfg.bce_enabled } else { true };
+    var allow_incomplete = false;
     var specs_file: const u8[:] = "";
     var auto_specs = false;
     var cov_files:    u8[>..]     = [];
@@ -99,7 +114,7 @@ fn run_crap_cli() -> i32 {
 
     if all_args.len <= 2 && target_arg_buf.len == 0 {
         print_crap_usage();
-        return 1;
+        return 2;
     }
 
     var i: i64 = 2;
@@ -119,47 +134,101 @@ fn run_crap_cli() -> i32 {
             }
         } else if arg == "--include-tests" {
             include_tests = true;
+        } else if arg == "--no-bce" {
+            auto_bce = false;
+            bce_file = "";
+        } else if arg == "--allow-incomplete-analysis" {
+            allow_incomplete = true;
         } else if arg == "--bce-lines" {
-            if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "--") {
+            if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "-") && file_exists(all_args[i + 1]) && !is_dir(all_args[i + 1]) {
                 bce_file = all_args[i + 1];
+                auto_bce = false;
                 i++;
             } else {
                 auto_bce = true;
             }
         } else if arg == "--specs" {
-            if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "--") {
+            if i + 1 < all_args.len && !slice_starts_with(all_args[i + 1], "-") && file_exists(all_args[i + 1]) && !is_dir(all_args[i + 1]) {
                 specs_file = all_args[i + 1];
+                auto_specs = false;
                 i++;
             } else {
                 auto_specs = true;
             }
-        } else if arg == "--cov" && i + 1 < all_args.len {
+        } else if arg == "--cov" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --cov requires a coverage ratio (0.0..1.0) or profile path\n");
+                return 2;
+            }
             let cov_val = all_args[i + 1];
             let val, ok = parse_f64_slice(cov_val);
-            if ok && val >= 0.0 && val <= 1.0 {
+            if ok {
+                guard val >= 0.0 && val <= 1.0 else {
+                    write_stderr("Error: --cov ratio must be between 0.0 and 1.0\n");
+                    return 2;
+                }
                 cfg.default_cov = val;
             } else {
+                guard file_exists(cov_val) else {
+                    write_stderr("Error: coverage profile file not found: ");
+                    write_stderr(cov_val);
+                    write_stderr("\n");
+                    return 2;
+                }
                 cov_files.append(cov_val);
                 cov_files.push('\n');
                 cfg.has_coverage_profile = true;
             }
             i++;
-        } else if arg == "--lcov" && i + 1 < all_args.len {
+        } else if arg == "--lcov" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --lcov requires a tracefile path\n");
+                return 2;
+            }
             lcov_file = all_args[i + 1];
+            guard file_exists(lcov_file) else {
+                write_stderr("Error: LCOV file not found: ");
+                write_stderr(lcov_file);
+                write_stderr("\n");
+                return 2;
+            }
             cfg.has_coverage_profile = true;
             i++;
-        } else if arg == "--format" && i + 1 < all_args.len {
-            set_bounded(format_buf, all_args[i + 1]);
+        } else if arg == "--format" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --format requires one of: table, md, json, gcc, sarif\n");
+                return 2;
+            }
+            let fmt_arg = all_args[i + 1];
+            guard is_valid_format_mode(fmt_arg) else {
+                write_stderr("Error: invalid --format value (expected table, md, json, gcc, or sarif): ");
+                write_stderr(fmt_arg);
+                write_stderr("\n");
+                return 2;
+            }
+            set_bounded(format_buf, fmt_arg);
             i++;
-        } else if arg == "--out" && i + 1 < all_args.len {
+        } else if arg == "--out" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --out requires an output file path\n");
+                return 2;
+            }
             out_file = all_args[i + 1];
             i++;
-        } else if arg == "--config" && i + 1 < all_args.len {
+        } else if arg == "--config" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --config requires a configuration file path\n");
+                return 2;
+            }
             i++;
         } else if arg == "--no-baseline" {
             no_baseline = true;
             baseline_buf.clear();
-        } else if arg == "--baseline" && i + 1 < all_args.len {
+        } else if arg == "--baseline" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --baseline requires a baseline file path\n");
+                return 2;
+            }
             set_bounded(baseline_buf, all_args[i + 1]);
             i++;
         } else if arg == "--save-baseline" {
@@ -169,29 +238,74 @@ fn run_crap_cli() -> i32 {
             } else {
                 default_save_baseline_path(lit_cfg.baseline_buf[..], save_baseline_buf);
             }
-        } else if arg == "--default-cov" && i + 1 < all_args.len {
+        } else if arg == "--default-cov" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --default-cov requires a value in 0.0..1.0\n");
+                return 2;
+            }
             let val, ok = parse_f64_slice(all_args[i + 1]);
-            if ok { cfg.default_cov = val; }
+            guard ok && val >= 0.0 && val <= 1.0 else {
+                write_stderr("Error: --default-cov must be between 0.0 and 1.0\n");
+                return 2;
+            }
+            cfg.default_cov = val;
             i++;
-        } else if arg == "--alpha" && i + 1 < all_args.len {
+        } else if arg == "--alpha" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --alpha requires a numeric weight\n");
+                return 2;
+            }
             let val, ok = parse_f64_slice(all_args[i + 1]);
-            if ok { cfg.alpha_bce_keep = val; }
+            guard ok && val >= 0.0 else {
+                write_stderr("Error: --alpha must be a non-negative number\n");
+                return 2;
+            }
+            cfg.alpha_bce_keep = val;
             i++;
-        } else if arg == "--beta" && i + 1 < all_args.len {
+        } else if arg == "--beta" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --beta requires a numeric weight\n");
+                return 2;
+            }
             let val, ok = parse_f64_slice(all_args[i + 1]);
-            if ok { cfg.beta_ovf = val; }
+            guard ok && val >= 0.0 else {
+                write_stderr("Error: --beta must be a non-negative number\n");
+                return 2;
+            }
+            cfg.beta_ovf = val;
             i++;
-        } else if arg == "--threshold" && i + 1 < all_args.len {
+        } else if arg == "--threshold" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --threshold requires a numeric value\n");
+                return 2;
+            }
             let val, ok = parse_f64_slice(all_args[i + 1]);
-            if ok { cfg.gcrap_threshold = val; }
+            guard ok && val >= 0.0 else {
+                write_stderr("Error: --threshold must be a non-negative number\n");
+                return 2;
+            }
+            cfg.gcrap_threshold = val;
             i++;
         } else if arg == "--explain" {
             explain_mode = true;
-        } else if arg == "--delta" && i + 1 < all_args.len {
+        } else if arg == "--delta" {
+            guard i + 1 < all_args.len else {
+                write_stderr("Error: --delta requires a numeric value\n");
+                return 2;
+            }
             let val, ok = parse_f64_slice(all_args[i + 1]);
-            if ok { delta_threshold = val; }
+            guard ok && val >= 0.0 else {
+                write_stderr("Error: --delta must be a non-negative number\n");
+                return 2;
+            }
+            delta_threshold = val;
             i++;
-        } else if !slice_starts_with(arg, "-") {
+        } else if slice_starts_with(arg, "-") {
+            write_stderr("Error: unknown option: ");
+            write_stderr(arg);
+            write_stderr("\n");
+            return 2;
+        } else {
             let val, ok = parse_f64_slice(arg);
             if enforce_gate && ok && target_paths_blob.len > 0 && !file_exists(arg) && !is_dir(arg) {
                 gate_ceiling = val;
@@ -220,7 +334,14 @@ fn run_crap_cli() -> i32 {
     if target_path.len == 0 {
         write_stderr("Error: Missing target file or directory path.\n");
         print_crap_usage();
-        return 1;
+        return 2;
+    }
+
+    if !file_exists(target_path) && !is_dir(target_path) {
+        write_stderr("Error: target path does not exist: ");
+        write_stderr(target_path);
+        write_stderr("\n");
+        return 2;
     }
 
     var files_blob: u8[>..] = [];
@@ -237,6 +358,12 @@ fn run_crap_cli() -> i32 {
             let t_item = trim_ascii(target_paths_blob[tp_start..tp_end]);
             tp_start = tp_end + 1;
             if t_item.len > 0 {
+                if !file_exists(t_item) && !is_dir(t_item) {
+                    write_stderr("Error: target path does not exist: ");
+                    write_stderr(t_item);
+                    write_stderr("\n");
+                    return 2;
+                }
                 collect_goose_files_filtered(t_item, include_tests, lit_cfg.exclude_buf[..], files_blob);
             }
         }
@@ -248,7 +375,7 @@ fn run_crap_cli() -> i32 {
         write_stderr("Error: No .goose files found under: ");
         write_stderr(target_path);
         write_stderr("\n");
-        return 1;
+        return 2;
     }
 
     var pool:       u8[>..]           = [];
@@ -256,9 +383,11 @@ fn run_crap_cli() -> i32 {
     var branches:   BranchSite[>..]   = [];
     var call_sites: CallSite[>..]     = [];
 
-    // 1. Analyze AST for each file
-    var file_src:   u8[>..] = [];
-    var line_start: i64     = 0;
+    // 1. Analyze AST for each file (deduplicating identical mirrored copies by FNV-1a content hash + length)
+    var seen_hashes: u64[>..] = [];
+    var seen_lens:   i64[>..] = [];
+    var file_src:    u8[>..]  = [];
+    var line_start:  i64      = 0;
     while line_start < files_blob.len {
         var line_end = files_blob.len;
         for j in line_start..files_blob.len {
@@ -274,7 +403,20 @@ fn run_crap_cli() -> i32 {
         if fpath.len > 0 {
             file_src.clear();
             if read_file(fpath, file_src) {
-                analyze_goose_file_with_calls(fpath, file_src, pool, functions, branches, call_sites);
+                let h = fnv1a_hash_bytes(file_src[..]);
+                let flen = file_src.len;
+                var is_dup = false;
+                for hi in seen_hashes.len {
+                    if seen_hashes[hi] == h && seen_lens[hi] == flen {
+                        is_dup = true;
+                        break;
+                    }
+                }
+                if !is_dup {
+                    seen_hashes.push(h);
+                    seen_lens.push(flen);
+                    analyze_goose_file_with_calls(fpath, file_src, pool, functions, branches, call_sites);
+                }
             }
         }
     }
@@ -290,9 +432,23 @@ fn run_crap_cli() -> i32 {
     // 3. Load or run `--bce-lines`
     var bce_blob: u8[>..] = [];
     if bce_file.len > 0 {
-        read_file(bce_file, bce_blob);
+        if read_file(bce_file, bce_blob) {
+            cfg.bce_state = ANALYSIS_COMPLETE;
+        } else {
+            cfg.bce_state = ANALYSIS_FAILED;
+        }
     } else if auto_bce {
-        run_goose_bce_lines(target_path, bce_blob);
+        let bce_rc = run_goose_bce_lines(target_path, bce_blob);
+        if bce_rc == 0 || bce_blob.len > 0 {
+            cfg.bce_state = ANALYSIS_COMPLETE;
+        } else {
+            cfg.bce_state = ANALYSIS_FAILED;
+            if enforce_gate && !allow_incomplete {
+                write_stderr("Warning: goose --bce-lines compiler check failed; safety analysis is incomplete.\n");
+            }
+        }
+    } else {
+        cfg.bce_state = ANALYSIS_NOT_REQUESTED;
     }
     if bce_blob.len > 0 {
         apply_bce_lines_blob(bce_blob, pool, functions, branches);
@@ -333,22 +489,39 @@ fn run_crap_cli() -> i32 {
     // 7. Compute Classic CRAP and G-CRAP
     compute_crap_metrics(cfg, functions, branches);
 
+    let is_machine_stdout = (out_file.len == 0) &&
+        (format_mode == "json" || format_mode == "sarif" || format_mode == "gcc");
+
     // 8. Save baseline snapshot if requested
     if save_baseline_file_path.len > 0 {
         if save_baseline_file(save_baseline_file_path, target_path, pool, functions) {
-            write_stdout("Saved baseline snapshot to: ");
-            write_stdout(save_baseline_file_path);
-            write_stdout("\n");
+            if is_machine_stdout {
+                write_stderr("Saved baseline snapshot to: ");
+                write_stderr(save_baseline_file_path);
+                write_stderr("\n");
+            } else {
+                write_stdout("Saved baseline snapshot to: ");
+                write_stdout(save_baseline_file_path);
+                write_stdout("\n");
+            }
         }
     }
 
     // 9. Evaluate CI ratchet gate if requested (in radar mode)
+    var ratchet_failed = false;
     if baseline_file.len > 0 && !enforce_gate {
         var ratchet_report: u8[>..] = [];
         let violations = check_ratchet_gate(baseline_file, pool, functions, delta_threshold, ratchet_report);
-        write_stdout(ratchet_report[..]);
+        if is_machine_stdout {
+            write_stderr(ratchet_report[..]);
+        } else {
+            write_stdout(ratchet_report[..]);
+        }
         if violations > 0 {
-            return 1;
+            if !is_machine_stdout {
+                return 1;
+            }
+            ratchet_failed = true;
         }
     }
 
@@ -373,6 +546,9 @@ fn run_crap_cli() -> i32 {
         write_stdout("\n");
     } else {
         write_stdout(report_buf[..]);
+    }
+    if ratchet_failed {
+        return 1;
     }
 
     // 11. Branch-level hotspot explanation if requested

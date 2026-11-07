@@ -99,7 +99,10 @@ fn parse_packet_payload(input_str: const u8[:], out_bytes: u8[>..]&) -> bool {
             i += 1;
             continue;
         }
-        if i + 1 >= clean.len { break; }
+        if i + 1 >= clean.len {
+            out_bytes.clear();
+            return false;
+        }
 
         var h0: u8 = 0;
         var h1: u8 = 0;
@@ -109,12 +112,18 @@ fn parse_packet_payload(input_str: const u8[:], out_bytes: u8[>..]&) -> bool {
         if c0 >= '0' && c0 <= '9' { h0 = c0 - '0'; }
         else if c0 >= 'a' && c0 <= 'f' { h0 = c0 - 'a' + 10; }
         else if c0 >= 'A' && c0 <= 'F' { h0 = c0 - 'A' + 10; }
-        else { break; }
+        else {
+            out_bytes.clear();
+            return false;
+        }
 
         if c1 >= '0' && c1 <= '9' { h1 = c1 - '0'; }
         else if c1 >= 'a' && c1 <= 'f' { h1 = c1 - 'a' + 10; }
         else if c1 >= 'A' && c1 <= 'F' { h1 = c1 - 'A' + 10; }
-        else { break; }
+        else {
+            out_bytes.clear();
+            return false;
+        }
 
         out_bytes.push((h0 << 4) | h1);
         i += 2;

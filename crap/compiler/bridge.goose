@@ -110,30 +110,18 @@ fn append_compiler_options(cmd: u8[>..]&) {
     }
 }
 
-// Executes `goose --bce-lines --check` on target and captures diagnostic output.
+// Executes `goose --bce-lines --check` on target and captures diagnostic output without shell invocation.
 fn run_goose_bce_lines(target_path: const u8[:], out: u8[>..]&) -> i32 {
     var entry: u8[>..] = [];
     resolve_package_entry_point(target_path, entry);
-    var cmd: u8[>..] = [];
-    cmd.append("goose --bce-lines --check");
-    append_compiler_options(cmd);
-    cmd.append(" \"");
-    cmd.append(entry);
-    cmd.append("\"");
-    return exec_capture(cmd, out);
+    return exec_argv_capture("goose", "--bce-lines", "--check", entry[..], 0, out);
 }
 
-// Executes `goose --specs --check` on target and captures specialization output.
+// Executes `goose --specs --check` on target and captures specialization output without shell invocation.
 fn run_goose_specs(target_path: const u8[:], out: u8[>..]&) -> i32 {
     var entry: u8[>..] = [];
     resolve_package_entry_point(target_path, entry);
-    var cmd: u8[>..] = [];
-    cmd.append("goose --specs --check");
-    append_compiler_options(cmd);
-    cmd.append(" \"");
-    cmd.append(entry);
-    cmd.append("\"");
-    return exec_capture(cmd, out);
+    return exec_argv_capture("goose", "--specs", "--check", entry[..], 0, out);
 }
 
 // Parses one bce-line record: "bce-line: <file>:<line>: <elided> elided, <kept> kept"
@@ -152,14 +140,13 @@ fn parse_bce_line(
     let rest = trim_ascii(t[9..]);
 
     // Format: <file>:<line>: <elided> elided, <kept> kept
-    // Note on Windows: file may start with C: or d:
+    // Note on Windows: file may contain a drive letter colon followed by '/' or '\' (e.g. C:/... or ./C:/...)
     var first_colon:  i64 = -1;
     var second_colon: i64 = -1;
 
     for i in rest.len {
         if rest[i] == ':' {
-            // Ignore drive letter colon like d: at index 1
-            if i == 1 {
+            if i + 1 < rest.len && (rest[i + 1] == '/' || rest[i + 1] == '\\') {
                 continue;
             }
             if first_colon < 0 {
@@ -244,10 +231,11 @@ fn apply_bce_lines_blob(
                     let st = functions[fi].start_line;
                     let en = functions[fi].end_line;
                     if line_num >= st && line_num <= en {
-                        // Find the innermost branch site covering this line
+                        // Find the innermost branch site covering this line (narrowest line span, then highest depth)
                         let f_first = functions[fi].first_branch;
                         let f_count = functions[fi].branch_count;
                         var matched_bid: i64 = -1;
+                        var best_span:   i32 = 2147483647;
                         var best_depth:  i32 = -1;
 
                         for bi in f_count {
@@ -255,9 +243,14 @@ fn apply_bce_lines_blob(
                             if idx < branches.len {
                                 let b_start = branches[idx].start_line;
                                 let b_end = branches[idx].end_line;
-                                if line_num >= b_start && line_num <= b_end && branches[idx].depth >= best_depth {
-                                    matched_bid = idx;
-                                    best_depth = branches[idx].depth;
+                                if line_num >= b_start && line_num <= b_end {
+                                    let b_span = b_end - b_start;
+                                    let b_depth = branches[idx].depth;
+                                    if matched_bid < 0 || b_span < best_span || (b_span == best_span && b_depth >= best_depth) {
+                                        matched_bid = idx;
+                                        best_span = b_span;
+                                        best_depth = b_depth;
+                                    }
                                 }
                             }
                         }
@@ -313,6 +306,8 @@ fn apply_specs_blob(
 
         if slice_starts_with(raw_line, "// spec ") {
             pending_spec = true;
+            cur_nodes = 0;
+            cur_nest = 0;
             cur_noinline = slice_contains(raw_line, "noinline");
 
             let nodes_idx = slice_index_of(raw_line, "nodes ");
@@ -356,18 +351,37 @@ fn apply_specs_blob(
             if lt_idx > 0 {
                 sig_name = trim_ascii(sig_name[..lt_idx]);
             }
+            if slice_starts_with(sig_name, "::") {
+                sig_name = trim_ascii(sig_name[2..]);
+            }
 
+            // Pass 1: Match exact qualified name
+            var matched_exact = false;
             for fi in functions.len {
                 let qname = pool_slice(pool, functions[fi].qual_off, functions[fi].qual_len);
-                let sname = pool_slice(pool, functions[fi].name_off, functions[fi].name_len);
-                if sig_name == qname || sig_name == sname {
+                if sig_name == qname {
+                    matched_exact = true;
                     functions[fi].specs_count++;
                     functions[fi].max_spec_nodes = max(functions[fi].max_spec_nodes, cur_nodes);
                     functions[fi].compiler_nest = max(functions[fi].compiler_nest, cur_nest);
                     if cur_noinline {
                         functions[fi].has_noinline = true;
                     }
-                    break;
+                }
+            }
+
+            // Pass 2: Fallback to short name across matching generic functions
+            if !matched_exact {
+                for fi in functions.len {
+                    let sname = pool_slice(pool, functions[fi].name_off, functions[fi].name_len);
+                    if sig_name == sname {
+                        functions[fi].specs_count++;
+                        functions[fi].max_spec_nodes = max(functions[fi].max_spec_nodes, cur_nodes);
+                        functions[fi].compiler_nest = max(functions[fi].compiler_nest, cur_nest);
+                        if cur_noinline {
+                            functions[fi].has_noinline = true;
+                        }
+                    }
                 }
             }
             cur_nodes = 0;

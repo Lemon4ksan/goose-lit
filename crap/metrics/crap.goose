@@ -26,8 +26,9 @@ fn compute_crap_metrics(
         let cc = functions[fi].cyclomatic_cc as f64;
         let eff_cc = functions[fi].effective_cc as f64;
         let cov = functions[fi].cov_branch;
+        let clamped_cov = min(1.0, max(0.0, cov));
 
-        let uncov_fraction = max(0.0, 1.0 - cov);
+        let uncov_fraction = 1.0 - clamped_cov;
         let uncov_cubed = cube_f64(uncov_fraction);
 
         // 1. Classic CRAP: CC^2 * (1 - cov)^3 + CC
@@ -75,18 +76,22 @@ fn compute_crap_metrics(
         functions[fi].fuzz_priority = fuzz_score;
 
         // 6. Assign diagnostic archetype with --specs fusion
-        if functions[fi].uninstantiated_generic {
-            functions[fi].archetype = ARCHETYPE_DEAD_CODE_AUDIT;
-        } else if functions[fi].cyclomatic_cc >= 20 && cov >= 0.99 && functions[fi].uncovered_bce_keep == 0 {
-            functions[fi].archetype = ARCHETYPE_VERIFIED_DISPATCH;
-        } else if functions[fi].uncovered_bce_keep > 0 && cov < 0.99 {
+        if functions[fi].uncovered_bce_keep > 0 {
             functions[fi].archetype = ARCHETYPE_PANIC_HAZARD;
+        } else if functions[fi].uninstantiated_generic {
+            functions[fi].archetype = ARCHETYPE_DEAD_CODE_AUDIT;
+        } else if functions[fi].cyclomatic_cc >= 20 && clamped_cov >= 0.99 &&
+                  functions[fi].uncovered_bce_keep == 0 && functions[fi].uncovered_ovf_ops == 0 &&
+                  cfg.bce_state == ANALYSIS_COMPLETE {
+            functions[fi].archetype = ARCHETYPE_VERIFIED_DISPATCH;
         } else if functions[fi].trust_class == TRUST_UNTRUSTED &&
-                   (g_crap_val >= cfg.gcrap_threshold || cov < 0.5) {
+                  (g_crap_val >= cfg.gcrap_threshold || clamped_cov < 0.5) {
             functions[fi].archetype = ARCHETYPE_FUZZ_PRIORITY;
-        } else if cov >= 0.90 && functions[fi].uncovered_bce_keep == 0 {
+        } else if clamped_cov >= 0.90 && functions[fi].uncovered_bce_keep == 0 &&
+                  functions[fi].uncovered_ovf_ops == 0 && g_crap_val <= cfg.gcrap_threshold &&
+                  functions[fi].effective_cc <= 15 && cfg.bce_state == ANALYSIS_COMPLETE {
             functions[fi].archetype = ARCHETYPE_SAFE_PRIMITIVE;
-        } else if cov >= 0.50 && cov < 1.0 {
+        } else if clamped_cov >= 0.50 && clamped_cov < 1.0 {
             functions[fi].archetype = ARCHETYPE_DEAD_CODE_AUDIT;
         } else {
             functions[fi].archetype = ARCHETYPE_LOW_PRIORITY;

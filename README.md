@@ -173,10 +173,14 @@ goose-lit gate src/ 25.0 --cov 0.85
 | Flag | Supported in | Description |
 | :--- | :--- | :--- |
 | `--config <file>` | all | Loads custom configuration file (default: `.litconfig`). |
+| `--test-dir <dir>` | `<path>`, `test` | Overrides test root directory (default: `tests` or `tests_dir` in `.litconfig`). |
+| `--timeout <ms>` | `<path>`, `test` | Per-command execution timeout in milliseconds (default: `30000`, `0` = unlimited). |
 | `--prefix <PREF>` | `filecheck` | Configures FileCheck pattern prefix (default: `CHECK`). |
 | `--verbose`, `-v` | `<path>`, `gate`, `crap` | Shows command output and execution time. |
 | `--simd [byte]` | `inspect` | Displays 128-bit SIMD lane inspection matching byte (default: `/`). |
 | `--offset <N>` | `inspect` | Sets memory offset for hexdump output. |
+| `--bce-lines [file]` | `crap`, `gate` | Loads compiler bounds-check elimination output or runs `goose --bce-lines` (enabled by default). |
+| `--no-bce` | `crap`, `gate` | Disables automatic `goose --bce-lines` compiler bridge. |
 | `--cov <val\|file>` | `crap`, `gate` | Sets branch coverage (`0.0..1.0`) or loads a coverage file. |
 | `--default-cov <val>`| `crap`, `gate` | Sets fallback coverage when a function has no profile data (default: `0.0`). |
 | `--threshold <val>` | `crap` | Sets G-CRAP warning threshold (default: `25.0`). |
@@ -239,9 +243,10 @@ Directives are parsed from comments in test files:
 
 Pattern rules:
 - Plain substrings match exact text.
-- `{{regex}}` matches regular expressions, for example `{{[0-9a-fA-F]+}}` or `{{.*}}`.
+- `{{regex}}` matches regular expressions (`{{.*}}`, `{{.+}}`, character classes like `{{[0-9a-fA-F]+}}`, negated classes `{{[^ ]+}}`, and escape classes `\d`, `\w`, `\s`). Full alternation (`a|b`) and counted repetitions (`{m,n}`) are not supported in the zero-allocation engine.
 - `[[VAR:regex]]` matches the pattern and stores the matched text in variable `VAR`.
 - `[[VAR]]` matches the text saved in `VAR`.
+- `[[#VAR:]]` captures an unsigned decimal integer into numeric variable `VAR`, and `[[#VAR + N]]` / `[[#VAR - N]]` matches the evaluated decimal value with a non-digit boundary check.
 
 ### LIT command substitutions
 

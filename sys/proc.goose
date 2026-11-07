@@ -15,6 +15,17 @@ extern fn native_exec_to_file_timeout(
     out_path:   const u8[:],
     timeout_ms: i32,
 ) -> i32 = "crap_exec_to_file_timeout";
+extern fn native_exec_argv_to_file(
+    prog:       const u8[:],
+    arg1:       const u8[:],
+    arg2:       const u8[:],
+    arg3:       const u8[:],
+    out_path:   const u8[:],
+    timeout_ms: i32,
+) -> i32 = "crap_exec_argv_to_file";
+extern fn native_last_exec_timed_out() -> i32 = "crap_last_exec_timed_out";
+extern fn native_remove_tree(path: const u8[:]) -> i32 = "crap_remove_tree";
+extern fn native_has_executable(prog: const u8[:]) -> i32 = "crap_has_executable";
 extern fn native_setenv(key: const u8[:], val: const u8[:]) -> i32 = "crap_setenv";
 extern fn native_host_os() -> i32 = "crap_host_os";
 extern fn native_host_arch() -> i32 = "crap_host_arch";
@@ -90,6 +101,42 @@ fn exec_capture_timeout(cmd: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32
     return rc;
 }
 
+// Runs a program with up to 3 arguments directly (no shell) and captures stdout/stderr into `out`.
+fn exec_argv_capture(
+    prog:       const u8[:],
+    arg1:       const u8[:],
+    arg2:       const u8[:],
+    arg3:       const u8[:],
+    timeout_ms: i32,
+    out:        u8[>..]&,
+) -> i32 {
+    g_cmd_seq += 1;
+    ensure_lit_cache_dir();
+
+    var tmp_path: u8[>..] = [];
+    if is_dir(".lit/cache") {
+        tmp_path.append(".lit/cache/.gcrap_cmd_");
+    } else {
+        tmp_path.append(".gcrap_cmd_");
+    }
+    append_u64(tmp_path, clock_ns() as u64);
+    tmp_path.push('_');
+    append_u64(tmp_path, g_cmd_seq);
+    tmp_path.append(".tmp");
+
+    let rc = native_exec_argv_to_file(prog, arg1, arg2, arg3, tmp_path, timeout_ms);
+    if file_exists(tmp_path) {
+        read_file(tmp_path, out);
+        delete_file(tmp_path);
+    }
+    return rc;
+}
+
+inline fn is_unit_test_filename(name: const u8[:]) -> bool {
+    guard slice_ends_with(name, ".goose") else { return false; }
+    return name == "test.goose" || slice_ends_with(name, "_test.goose") || slice_starts_with(name, "test_");
+}
+
 inline fn is_ignored_dir_entry(name: const u8[:]) -> bool {
     guard name.len > 0 && name[0] != '.' else { return true; }
     return name == "vendor" || name == "scratch" || name == "bin" ||
@@ -130,7 +177,7 @@ fn scan_dir_entries_filtered(
             dir_queue.append(child);
             dir_queue.push('\n');
         } else if slice_ends_with(name, ".goose") {
-            guard include_tests || !slice_ends_with(name, "_test.goose") else { continue; }
+            guard include_tests || !is_unit_test_filename(name) else { continue; }
             out_paths_blob.append(child);
             out_paths_blob.push('\n');
         }

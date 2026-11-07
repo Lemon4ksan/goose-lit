@@ -29,7 +29,7 @@ struct CheckRule {
 
 struct FileCheckVar {
     name: u8[..64]  = [],
-    val:  u8[..256] = [],
+    val:  u8[..512] = [],
 }
 
 struct FileCheckContext {
@@ -82,10 +82,25 @@ fn match_spec_char(spec: const u8[:], c: u8) -> bool {
     if spec == "[ \\t]+" || spec == "\\s+" {
         return c == ' ' || c == '\t';
     }
-    if spec.len >= 2 && spec[0] == '[' && spec[spec.len - 1] == ']' {
-        let inside = spec[1..spec.len - 1];
-        for b in inside {
-            if b == c { return true; }
+    var clean_spec = spec;
+    if clean_spec.len >= 3 && clean_spec[0] == '[' && (clean_spec[clean_spec.len - 1] == '+' || clean_spec[clean_spec.len - 1] == '*') {
+        clean_spec = clean_spec[..clean_spec.len - 1];
+    }
+    if clean_spec.len >= 2 && clean_spec[0] == '[' && clean_spec[clean_spec.len - 1] == ']' {
+        let inside = clean_spec[1..clean_spec.len - 1];
+        var idx: i64 = 0;
+        while idx < inside.len {
+            if idx + 2 < inside.len && inside[idx + 1] == '-' {
+                if c >= inside[idx] && c <= inside[idx + 2] {
+                    return true;
+                }
+                idx += 3;
+            } else {
+                if inside[idx] == c {
+                    return true;
+                }
+                idx += 1;
+            }
         }
         return false;
     }
@@ -103,7 +118,7 @@ enum SegKind {
 
 struct PatternSeg {
     kind:       SegKind   = SegKind.Lit,
-    text:       u8[..128] = [],
+    text:       u8[..512] = [],
     spec:       u8[..64]  = [],
     num_offset: i64       = 0,
 }
@@ -117,10 +132,9 @@ inline fn push_seg(
 ) -> bool {
     guard out_segs.len < out_segs.cap else { return false; }
     var seg = PatternSeg { kind: kind, num_offset: num_offset, .. };
-    let tlen = min(text.len, seg.text.cap);
-    seg.text.append(text[..tlen]);
-    let slen = min(spec.len, seg.spec.cap);
-    seg.spec.append(spec[..slen]);
+    guard text.len <= seg.text.cap && spec.len <= seg.spec.cap else { return false; }
+    seg.text.append(text);
+    seg.spec.append(spec);
     out_segs.push(seg);
     return true;
 }
@@ -210,6 +224,61 @@ fn parse_pattern_segs(pat: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
         }
     }
     return true;
+}
+
+fn resolve_seg_literal(
+    seg:        const PatternSeg&,
+    local_vars: const FileCheckVar[:],
+    ctx:        const FileCheckContext&,
+    out_buf:    u8[..512]&,
+) -> bool {
+    out_buf.clear();
+    if seg.kind == SegKind.Lit {
+        guard seg.text.len <= out_buf.cap else { return false; }
+        out_buf.append(seg.text[..]);
+        return true;
+    }
+    if seg.kind == SegKind.VarUse {
+        let name = seg.text[..];
+        for i in local_vars.len {
+            if local_vars[i].name[..] == name {
+                guard local_vars[i].val.len <= out_buf.cap else { return false; }
+                out_buf.append(local_vars[i].val[..]);
+                return true;
+            }
+        }
+        let v, ok = get_var(ctx, name);
+        if ok && v.len <= out_buf.cap {
+            out_buf.append(v);
+            return true;
+        }
+        return false;
+    }
+    if seg.kind == SegKind.NumExpr {
+        let name = seg.text[..];
+        var val_buf: u8[..64] = [];
+        var found_v = false;
+        for i in local_vars.len {
+            if local_vars[i].name[..] == name {
+                for b in local_vars[i].val { if val_buf.len < val_buf.cap { val_buf.push(b); } }
+                found_v = true;
+                break;
+            }
+        }
+        if !found_v {
+            let v, ok = get_var(ctx, name);
+            if ok {
+                for b in v { if val_buf.len < val_buf.cap { val_buf.push(b); } }
+                found_v = true;
+            }
+        }
+        guard found_v else { return false; }
+        let base_num, ok_b = crap::parse_i64_slice(val_buf[..]);
+        guard ok_b else { return false; }
+        format(out_buf, base_num + seg.num_offset);
+        return true;
+    }
+    return false;
 }
 
 fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckContext&, out_end_pos: i64& = 0) -> bool {
@@ -302,14 +371,26 @@ fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckCont
                     match_ok = false;
                     break;
                 }
-                pos += num_buf.len;
+                let end_num_pos = pos + num_buf.len;
+                if end_num_pos < line.len && crap::is_ascii_digit(line[end_num_pos]) {
+                    match_ok = false;
+                    break;
+                }
+                pos = end_num_pos;
             } else {
                 let is_card_any = (seg.spec[..] == ".*" || seg.spec[..] == ".+" || seg.spec[..] == "*");
                 let is_at_least_one = (seg.spec[..] != ".*" && seg.spec[..] != "*");
                 let capture_start = pos;
 
-                if s_idx + 1 < segs.len && segs[s_idx + 1].kind == SegKind.Lit {
-                    let next_lit = segs[s_idx + 1].text[..];
+                var next_lit_buf: u8[..512] = [];
+                let has_next_lit = if s_idx + 1 < segs.len {
+                    resolve_seg_literal(segs[s_idx + 1], local_vars[..], ctx, next_lit_buf)
+                } else {
+                    false
+                };
+
+                if has_next_lit {
+                    let next_lit = next_lit_buf[..];
                     var found_anchor = false;
                     var search_p = if is_at_least_one { pos + 1 } else { pos };
                     while search_p <= line.len {
@@ -669,15 +750,47 @@ fn run_filecheck(
             in_idx = next_target + 1;
         } else if rule.kind == CheckKind.Not {
             var bound_line = section_end_line;
+            var check_same_line = false;
+            var same_limit_col: i64 = -1;
             var next_r = r_idx + 1;
             while next_r < rules.len {
-                if rules[next_r].kind == CheckKind.Check || rules[next_r].kind == CheckKind.Label {
+                let nk = rules[next_r].kind;
+                if nk == CheckKind.Not {
+                    next_r += 1;
+                    continue;
+                }
+                if nk == CheckKind.Same {
+                    check_same_line = true;
+                    bound_line = in_idx;
+                    if last_matched_line >= 0 && last_matched_line < in_lines_start.len {
+                        let full_line = output_stream[in_lines_start[last_matched_line]..in_lines_end[last_matched_line]];
+                        let rem_slice = if last_matched_col < full_line.len { full_line[last_matched_col..] } else { "" };
+                        let same_pat: const u8[:] = rules[next_r].pattern[..];
+                        var same_end: i64 = 0;
+                        var tmp_ctx = ctx;
+                        if match_pattern_in_line(rem_slice, same_pat, tmp_ctx, same_end) {
+                            same_limit_col = last_matched_col + same_end - same_pat.len;
+                            if same_limit_col < last_matched_col {
+                                same_limit_col = last_matched_col + same_end;
+                            }
+                        } else {
+                            same_limit_col = full_line.len;
+                        }
+                    }
+                    break;
+                }
+                if nk == CheckKind.Next || nk == CheckKind.Empty {
+                    bound_line = min(bound_line, in_idx + 1);
+                    break;
+                }
+                if nk == CheckKind.Check || nk == CheckKind.Label || nk == CheckKind.Count || nk == CheckKind.Dag {
                     let next_pat: const u8[:] = rules[next_r].pattern[..];
                     var s_i = in_idx;
+                    var tmp_ctx = ctx;
                     while s_i < bound_line {
                         let l_str = output_stream[in_lines_start[s_i]..in_lines_end[s_i]];
                         var dummy_col: i64 = 0;
-                        if match_pattern_in_line(l_str, next_pat, ctx, dummy_col) {
+                        if match_pattern_in_line(l_str, next_pat, tmp_ctx, dummy_col) {
                             bound_line = s_i;
                             break;
                         }
@@ -686,6 +799,27 @@ fn run_filecheck(
                     break;
                 }
                 next_r += 1;
+            }
+
+            if check_same_line && last_matched_line >= 0 && last_matched_line < in_lines_start.len {
+                let full_line = output_stream[in_lines_start[last_matched_line]..in_lines_end[last_matched_line]];
+                let end_col = if same_limit_col >= last_matched_col && same_limit_col <= full_line.len { same_limit_col } else { full_line.len };
+                let rem_slice = if last_matched_col < end_col { full_line[last_matched_col..end_col] } else { "" };
+                var dummy_col: i64 = 0;
+                if match_pattern_in_line(rem_slice, pat, ctx, dummy_col) {
+                    out_diag.append("FileCheck [");
+                    out_diag.append(pref);
+                    out_diag.append("-NOT] FAILED on line ");
+                    format(out_diag, rule.line_no);
+                    out_diag.append(": forbidden pattern '");
+                    out_diag.append(pat);
+                    out_diag.append("' appeared on input line ");
+                    format(out_diag, last_matched_line + 1);
+                    out_diag.append(":\n  '");
+                    out_diag.append(full_line);
+                    out_diag.append("'\n");
+                    return false;
+                }
             }
 
             var chk_i = in_idx;
@@ -714,28 +848,11 @@ fn run_filecheck(
                 dag_end += 1;
             }
 
-            var bound_line = section_end_line;
-            var next_r = dag_end;
-            while next_r < rules.len {
-                if rules[next_r].kind == CheckKind.Check || rules[next_r].kind == CheckKind.Label {
-                    let next_pat: const u8[:] = rules[next_r].pattern[..];
-                    var s_i = in_idx;
-                    while s_i < bound_line {
-                        let l_str = output_stream[in_lines_start[s_i]..in_lines_end[s_i]];
-                        var dummy_col: i64 = 0;
-                        if match_pattern_in_line(l_str, next_pat, ctx, dummy_col) {
-                            bound_line = s_i;
-                            break;
-                        }
-                        s_i += 1;
-                    }
-                    break;
-                }
-                next_r += 1;
-            }
+            let bound_line = section_end_line;
 
             claimed.clear();
             var max_matched_line = in_idx - 1;
+            var max_matched_col: i64 = 0;
 
             var d_i = r_idx;
             while d_i < dag_end {
@@ -751,11 +868,16 @@ fn run_filecheck(
                     }
                     if !already_claimed {
                         let l_str = output_stream[in_lines_start[l_i]..in_lines_end[l_i]];
-                        var dummy_col: i64 = 0;
-                        if match_pattern_in_line(l_str, d_pat, ctx, dummy_col) {
+                        var dag_col: i64 = 0;
+                        if match_pattern_in_line(l_str, d_pat, ctx, dag_col) {
                             found_dag_line = l_i;
                             claimed.push(l_i);
-                            max_matched_line = max(max_matched_line, l_i);
+                            if l_i > max_matched_line {
+                                max_matched_line = l_i;
+                                max_matched_col = dag_col;
+                            } else if l_i == max_matched_line && dag_col > max_matched_col {
+                                max_matched_col = dag_col;
+                            }
                             break;
                         }
                     }
@@ -777,7 +899,7 @@ fn run_filecheck(
             }
 
             last_matched_line = max_matched_line;
-            last_matched_col = 0;
+            last_matched_col = max_matched_col;
             in_idx = max_matched_line + 1;
             r_idx = dag_end;
             continue;

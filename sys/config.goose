@@ -14,6 +14,9 @@ struct LitConfig {
     tests_dir_buf:     u8[..256]  = [],
     src_dir_buf:       u8[..256]  = [],
     cc_buf:            u8[..256]  = [],
+    cc_source_buf:     u8[..32]   = [],
+    test_mode_buf:     u8[..32]   = [],
+    test_exec_buf:     u8[..256]  = [],
     exclude_buf:       u8[..1024] = [],
     format_buf:        u8[..32]   = [],
     prefix_buf:        u8[..32]   = [],
@@ -27,23 +30,59 @@ struct LitConfig {
     has_timeout:       bool       = false,
     include_tests:     bool       = false,
     has_include_tests: bool       = false,
+    bce_enabled:       bool       = true,
+    has_bce:           bool       = false,
     loaded:            bool       = false,
+}
+
+fn strip_config_value(raw: const u8[:]) -> const u8[:] {
+    var in_dquote = false;
+    var in_squote = false;
+    var end = raw.len;
+    for i in raw.len {
+        let b = raw[i];
+        if b == '"' && !in_squote {
+            in_dquote = !in_dquote;
+        } else if b == '\'' && !in_dquote {
+            in_squote = !in_squote;
+        } else if !in_dquote && !in_squote {
+            if b == '#' || b == ';' {
+                end = i;
+                break;
+            }
+            if b == '/' && i + 1 < raw.len && raw[i + 1] == '/' {
+                end = i;
+                break;
+            }
+        }
+    }
+    var s = trim_ascii(raw[..end]);
+    if s.len >= 2 && s[0] != '[' {
+        if (s[0] == '"' && s[s.len - 1] == '"') || (s[0] == '\'' && s[s.len - 1] == '\'') {
+            s = s[1..s.len - 1];
+        }
+    }
+    return s;
 }
 
 // crap:trusted
 // crap:trusted-bounds
 fn append_exclude_patterns(val: const u8[:], out: u8[..1024]&) {
+    var v = trim_ascii(val);
+    if v.len >= 2 && v[0] == '[' && v[v.len - 1] == ']' {
+        v = trim_ascii(v[1..v.len - 1]);
+    }
     var start: i64 = 0;
-    let n = val.len;
+    let n = v.len;
     while start <= n {
         var end = n;
         for i in start..n {
-            if val[i] == ',' {
+            if v[i] == ',' {
                 end = i;
                 break;
             }
         }
-        var tok = trim_ascii(val[start..end]);
+        var tok = trim_ascii(v[start..end]);
         start = end + 1;
         if tok.len >= 2 && tok[0] == '[' && tok[tok.len - 1] == ']' {
             tok = trim_ascii(tok[1..tok.len - 1]);
@@ -53,8 +92,11 @@ fn append_exclude_patterns(val: const u8[:], out: u8[..1024]&) {
         if is_dquote || is_squote {
             tok = tok[1..tok.len - 1];
         }
-        if slice_starts_with(tok, "./") || slice_starts_with(tok, ".\\") {
+        while slice_starts_with(tok, "./") || slice_starts_with(tok, ".\\") {
             tok = tok[2..];
+            while tok.len > 0 && (tok[0] == '/' || tok[0] == '\\') {
+                tok = tok[1..];
+            }
         }
         guard tok.len > 0 && out.len + tok.len + 1 <= out.cap else { continue; }
         for b in tok {
@@ -68,15 +110,16 @@ fn append_exclude_patterns(val: const u8[:], out: u8[..1024]&) {
 // crap:trusted-bounds
 fn is_excluded_path(path: const u8[:], exclude_blob: const u8[:]) -> bool {
     guard exclude_blob.len > 0 && path.len > 0 else { return false; }
-    var norm: u8[..512] = [];
     var p = path;
-    if slice_starts_with(p, "./") || slice_starts_with(p, ".\\") {
+    while slice_starts_with(p, "./") || slice_starts_with(p, ".\\") {
         p = p[2..];
-    }
-    for b in p {
-        if norm.len < norm.cap {
-            if b == '\\' { norm.push('/'); } else { norm.push(b); }
+        while p.len > 0 && (p[0] == '/' || p[0] == '\\') {
+            p = p[1..];
         }
+    }
+    var norm: u8[>..] = [];
+    for b in p {
+        if b == '\\' { norm.push('/'); } else { norm.push(b); }
     }
     let rel = norm[..];
     var start: i64 = 0;
@@ -122,8 +165,17 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
         set_bounded(cfg.src_dir_buf, val);
         return true;
     }
+    if key == "test_mode" {
+        set_bounded(cfg.test_mode_buf, val);
+        return true;
+    }
+    if key == "test_exec" {
+        set_bounded(cfg.test_exec_buf, val);
+        return true;
+    }
     if key == "goose_cc" || key == "cc" {
         if set_bounded(cfg.cc_buf, val) {
+            set_bounded(cfg.cc_source_buf, "config");
             native_setenv("GOOSE_CC", val);
         }
         return true;
@@ -180,16 +232,31 @@ fn apply_numeric_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) ->
 }
 
 fn apply_bool_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bool {
-    guard key == "include_tests" else { return false; }
-    if val == "true" || val == "1" {
-        cfg.include_tests = true;
-        cfg.has_include_tests = true;
-        return true;
+    if key == "include_tests" {
+        if val == "true" || val == "1" {
+            cfg.include_tests = true;
+            cfg.has_include_tests = true;
+            return true;
+        }
+        if val == "false" || val == "0" {
+            cfg.include_tests = false;
+            cfg.has_include_tests = true;
+            return true;
+        }
+        return false;
     }
-    if val == "false" || val == "0" {
-        cfg.include_tests = false;
-        cfg.has_include_tests = true;
-        return true;
+    if key == "bce" || key == "bce_lines" {
+        if val == "true" || val == "1" {
+            cfg.bce_enabled = true;
+            cfg.has_bce = true;
+            return true;
+        }
+        if val == "false" || val == "0" {
+            cfg.bce_enabled = false;
+            cfg.has_bce = true;
+            return true;
+        }
+        return false;
     }
     return false;
 }
@@ -210,7 +277,7 @@ fn parse_config_line(line: const u8[:], cfg: LitConfig&) {
     guard eq_idx > 0 && eq_idx + 1 <= line.len else { return; }
 
     let key = trim_ascii(line[..eq_idx]);
-    let val = trim_ascii(line[eq_idx + 1..]);
+    let val = strip_config_value(line[eq_idx + 1..]);
     guard key.len > 0 && val.len > 0 else { return; }
 
     if apply_path_setting(key, val, cfg) { return; }
@@ -272,14 +339,17 @@ fn load_lit_config(custom_path: const u8[:], cfg: LitConfig&) -> bool {
             cfg.loaded = true;
         }
     }
-    if native_host_os() == 1 && cfg.cc_buf.len == 0 {
+    if cfg.cc_buf.len == 0 {
         var cur_cc: u8[>..] = [];
-        if !env("GOOSE_CC", cur_cc) || cur_cc.len == 0 {
-            if file_exists("tools/gcc_noavx.cmd") {
-                native_setenv("GOOSE_CC", "tools/gcc_noavx.cmd");
-            } else if file_exists("tools/gcc_stack.bat") {
-                native_setenv("GOOSE_CC", "tools/gcc_stack.bat");
-            }
+        if env("GOOSE_CC", cur_cc) && cur_cc.len > 0 {
+            set_bounded(cfg.cc_buf, cur_cc[..]);
+            set_bounded(cfg.cc_source_buf, "env");
+        } else if native_host_os() == 1 && native_has_executable("gcc") == 1 {
+            set_bounded(cfg.cc_buf, "gcc");
+            set_bounded(cfg.cc_source_buf, "default (PATH)");
+            native_setenv("GOOSE_CC", "gcc");
+        } else {
+            set_bounded(cfg.cc_source_buf, "default");
         }
     }
     return cfg.loaded;

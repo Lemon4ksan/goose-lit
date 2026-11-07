@@ -29,6 +29,11 @@ let BRANCH_CLASS_IF_ELSE:      u8 = 5;
 let TRUST_TRUSTED:   u8 = 0;
 let TRUST_UNTRUSTED: u8 = 1;
 
+// Analysis completion tri-state
+let ANALYSIS_NOT_REQUESTED: u8 = 0;
+let ANALYSIS_COMPLETE:      u8 = 1;
+let ANALYSIS_FAILED:        u8 = 2;
+
 // Diagnostic engineering archetypes
 let ARCHETYPE_VERIFIED_DISPATCH: u8 = 1;
 let ARCHETYPE_VERIFIED_FSM:      u8 = 1; // backwards compatibility alias
@@ -131,6 +136,7 @@ struct RiskConfig {
     gcrap_threshold:      f64  = 25.0,
     default_cov:          f64  = 0.0,
     has_coverage_profile: bool = false,
+    bce_state:            u8   = 1,
 }
 
 fn default_risk_config() -> RiskConfig {
@@ -142,6 +148,7 @@ fn default_risk_config() -> RiskConfig {
         gcrap_threshold:      25.0,
         default_cov:          0.0,
         has_coverage_profile: false,
+        bce_state:            1,
     };
 }
 
