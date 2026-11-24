@@ -143,13 +143,13 @@ fn test_cycle2_bug2_ratchet_stateless_duplicate_bypass_and_parse_fallback() {
         g_crap:             75.0,
     };
 
-    let grandfathered_v2 = crap::is_grandfathered_in_baseline(v2_path, pool, regressed_eval_line50, 5.0);
+    let grandfathered_v2 = crap::is_grandfathered_in_baseline(v2_path, pool, regressed_eval_line50, 5.0, false);
     delete_file(v2_path);
     assert(!grandfathered_v2);
 
     let v1_path = ".tmp_swarm_ghost_c2_v1.baseline";
     write_file(v1_path, "# goose-crap baseline v1\neval 80.00 3 0.00\n");
-    let grandfathered_v1 = crap::is_grandfathered_in_baseline(v1_path, pool, regressed_eval_line50, 5.0);
+    let grandfathered_v1 = crap::is_grandfathered_in_baseline(v1_path, pool, regressed_eval_line50, 5.0, false);
     delete_file(v1_path);
     assert(grandfathered_v1);
 
@@ -169,7 +169,7 @@ fn test_cycle2_bug2_ratchet_stateless_duplicate_bypass_and_parse_fallback() {
         g_crap:             20.0,
     });
     var r_out: u8[>..] = [];
-    let corrupt_violations = crap::check_ratchet_gate(corrupt_path, pool, funcs, 5.0, r_out);
+    let corrupt_violations = crap::check_ratchet_gate(corrupt_path, pool, funcs, 5.0, false, r_out);
     delete_file(corrupt_path);
     assert(corrupt_violations == 1);
     assert(!crap::slice_contains(r_out, "increased from 0 to 1"));

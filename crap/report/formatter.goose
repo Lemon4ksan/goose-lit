@@ -98,10 +98,14 @@ fn render_terminal_report(
         append_padded_left(out, cog_buf, 4);
 
         out.append(" | ");
-        var cov_buf: u8[..12] = [];
-        append_f64_1(cov_buf, fn_info.cov_branch * 100.0);
-        cov_buf.push('%');
-        append_padded_left(out, cov_buf, 6);
+        if cfg.has_coverage_profile {
+            var cov_buf: u8[..12] = [];
+            append_f64_1(cov_buf, fn_info.cov_branch * 100.0);
+            cov_buf.push('%');
+            append_padded_left(out, cov_buf, 6);
+        } else {
+            append_padded_left(out, "N/A", 6);
+        }
 
         out.append(" | ");
         var bce_buf: u8[..32] = [];
@@ -130,6 +134,11 @@ fn render_terminal_report(
     append_u64(out, functions.len as u64);
     out.append("\n  Total branch sites:      ");
     append_u64(out, branches.len as u64);
+    if cfg.has_coverage_profile {
+        out.append("\n  Coverage mode:           real profile");
+    } else {
+        out.append("\n  Coverage mode:           static (no profile; run 'goose-lit cov' for real branch coverage)");
+    }
     out.append("\n  False alarms avoided:    ");
     append_i64(out, false_positives);
     out.append(" (Verified dispatch tables with classic CRAP > 30, G-CRAP = 0.0)\n");
@@ -196,8 +205,12 @@ fn render_markdown_report(
         out.append(" | ");
         append_i64(out, fn_info.cognitive_cc);
         out.append(" | ");
-        append_f64_1(out, fn_info.cov_branch * 100.0);
-        out.append("% | ");
+        if cfg.has_coverage_profile {
+            append_f64_1(out, fn_info.cov_branch * 100.0);
+            out.append("% | ");
+        } else {
+            out.append("N/A | ");
+        }
         append_i64(out, fn_info.uncovered_bce_keep);
         out.append(" | ");
         append_f64_1(out, fn_info.classic_crap);

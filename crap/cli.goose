@@ -39,9 +39,9 @@ fn print_crap_usage() {
     write_stdout("  --bce-lines [file]      Import pre-captured goose --bce-lines output or auto-run (enabled by default)\n");
     write_stdout("  --no-bce                Disable automatic goose --bce-lines compiler bridge\n");
     write_stdout("  --specs [file]          Import pre-captured goose --specs output or auto-run\n");
-    write_stdout("  --cov <val|file>        Set simulated coverage (0.0..1.0) or load .gcrap-cov profile\n");
+    write_stdout("  --cov <file>            Load real .gcrap-cov branch profile (generate with 'goose-lit cov')\n");
     write_stdout("  --lcov <file.info>      Load LCOV tracefile\n");
-    write_stdout("  --default-cov <val>     Default coverage for static triage (0.0 to 1.0, default 0.0)\n");
+    write_stdout("  --require-cov           Fail with exit code 2 if no real coverage profile is loaded\n");
     write_stdout("  --alpha <val>           Safety penalty weight for uncovered bce:keep (default 25.0)\n");
     write_stdout("  --beta <val>            Safety penalty weight for uncovered overflow ops (default 15.0)\n");
     write_stdout("  --threshold <val>       G-CRAP warning threshold (default 25.0)\n");
@@ -109,19 +109,24 @@ fn analyze_files_blob(
 }
 
 fn evaluate_gate_on_workspace(
-    pool:            const u8[:],
-    functions:       const FunctionInfo[:],
-    branches:        const BranchSite[:],
-    baseline_file:   const u8[:],
-    delta_threshold: f64,
-    gate_ceiling:    f64,
+    pool:                 const u8[:],
+    functions:            const FunctionInfo[:],
+    branches:             const BranchSite[:],
+    baseline_file:        const u8[:],
+    delta_threshold:      f64,
+    gate_ceiling:         f64,
+    has_coverage_profile: bool,
 ) -> i32 {
     var gate_violations: i64     = 0;
     var gate_report:     u8[>..] = [];
     gate_report.append("\n=== Hardware Complexity Gate Evaluation ===\n");
     gate_report.append("Ceiling: G-CRAP <= ");
     append_f64_1(gate_report, gate_ceiling);
-    gate_report.append(", EffCC <= 15, unproven_bce == 0\n\n");
+    if has_coverage_profile {
+        gate_report.append(", EffCC <= 15, unproven_bce == 0 (mode: real coverage)\n\n");
+    } else {
+        gate_report.append(" (static mode: EffCC <= 15, unproven_bce == 0; run 'goose-lit cov' for real G-CRAP)\n\n");
+    }
 
     var reason: u8[>..] = [];
     for fi in functions.len {
@@ -134,14 +139,14 @@ fn evaluate_gate_on_workspace(
         var violated = false;
         reason.clear();
 
-        if g_val > gate_ceiling {
+        if has_coverage_profile && g_val > gate_ceiling {
             violated = true;
             reason.append("G-CRAP ");
             append_f64_1(reason, g_val);
             reason.append(" > ");
             append_f64_1(reason, gate_ceiling);
         }
-        if eff > 15 && arch != ARCHETYPE_VERIFIED_DISPATCH && arch != ARCHETYPE_SAFE_PRIMITIVE {
+        if eff > 15 && (!has_coverage_profile || (arch != ARCHETYPE_VERIFIED_DISPATCH && arch != ARCHETYPE_SAFE_PRIMITIVE)) {
             if reason.len > 0 { reason.append("; "); }
             violated = true;
             reason.append("EffCC ");
@@ -160,7 +165,7 @@ fn evaluate_gate_on_workspace(
             let fn_name = pool_slice(pool, functions[fi].qual_off, functions[fi].qual_len);
             let fn_file = pool_slice(pool, functions[fi].file_off, functions[fi].file_len);
             let is_base_ok = baseline_file.len > 0 &&
-                is_grandfathered_in_baseline(baseline_file, pool, functions[fi], delta_threshold);
+                is_grandfathered_in_baseline(baseline_file, pool, functions[fi], delta_threshold, has_coverage_profile);
             if is_base_ok {
                 gate_report.append("  [BASELINE OK] ");
                 gate_report.append(fn_name);
@@ -261,11 +266,9 @@ fn run_crap_cli() -> i32 {
         format_buf.append("table");
     }
     var no_baseline = false;
+    var require_cov = false;
 
     var cfg = default_risk_config();
-    if lit_cfg.has_default_cov {
-        cfg.default_cov = lit_cfg.default_cov;
-    }
     var delta_threshold: f64 = if lit_cfg.has_delta { lit_cfg.delta_threshold } else { 5.0 };
     var include_tests = if lit_cfg.has_include_tests { lit_cfg.include_tests } else { false };
     var enforce_gate = false;
@@ -320,31 +323,28 @@ fn run_crap_cli() -> i32 {
             }
         } else if arg == "--cov" {
             guard i + 1 < all_args.len else {
-                write_stderr("Error: --cov requires a coverage ratio (0.0..1.0) or profile path\n");
+                write_stderr("Error: --cov requires a .gcrap-cov profile path\n");
                 return 2;
             }
             let cov_val = all_args[i + 1];
-            let val, ok = parse_f64_slice(cov_val);
-            if ok {
-                guard val >= 0.0 && val <= 1.0 else {
-                    write_stderr("Error: --cov ratio must be between 0.0 and 1.0\n");
-                    return 2;
-                }
-                cfg.default_cov = val;
-                cov_explicit = true;
-            } else {
-                guard file_exists(cov_val) else {
-                    write_stderr("Error: coverage profile file not found: ");
-                    write_stderr(cov_val);
-                    write_stderr("\n");
-                    return 2;
-                }
-                cov_files.append(cov_val);
-                cov_files.push('\n');
-                cfg.has_coverage_profile = true;
-                cov_explicit = true;
+            let _, is_num = parse_f64_slice(cov_val);
+            if is_num {
+                write_stderr("Error: simulated numeric --cov is removed; pass a real .gcrap-cov file (generate via 'goose-lit cov') or omit --cov for static mode.\n");
+                return 2;
             }
+            guard file_exists(cov_val) else {
+                write_stderr("Error: coverage profile file not found: ");
+                write_stderr(cov_val);
+                write_stderr("\n");
+                return 2;
+            }
+            cov_files.append(cov_val);
+            cov_files.push('\n');
+            cfg.has_coverage_profile = true;
+            cov_explicit = true;
             i++;
+        } else if arg == "--require-cov" {
+            require_cov = true;
         } else if arg == "--lcov" {
             guard i + 1 < all_args.len else {
                 write_stderr("Error: --lcov requires a tracefile path\n");
@@ -405,17 +405,8 @@ fn run_crap_cli() -> i32 {
                 default_save_baseline_path(lit_cfg.baseline_buf[..], save_baseline_buf);
             }
         } else if arg == "--default-cov" {
-            guard i + 1 < all_args.len else {
-                write_stderr("Error: --default-cov requires a value in 0.0..1.0\n");
-                return 2;
-            }
-            let val, ok = parse_f64_slice(all_args[i + 1]);
-            guard ok && val >= 0.0 && val <= 1.0 else {
-                write_stderr("Error: --default-cov must be between 0.0 and 1.0\n");
-                return 2;
-            }
-            cfg.default_cov = val;
-            i++;
+            write_stderr("Error: --default-cov is removed; use 'goose-lit cov' for real coverage profiles.\n");
+            return 2;
         } else if arg == "--alpha" {
             guard i + 1 < all_args.len else {
                 write_stderr("Error: --alpha requires a numeric weight\n");
@@ -603,6 +594,10 @@ fn run_crap_cli() -> i32 {
         cov_files.push('\n');
         cfg.has_coverage_profile = true;
     }
+    if require_cov && !cfg.has_coverage_profile {
+        write_stderr("Error: --require-cov specified but no real coverage profile was loaded (run 'goose-lit cov' first).\n");
+        return 2;
+    }
 
     // 5. Load coverage profile from file if specified
     if cov_files.len > 0 {
@@ -616,7 +611,11 @@ fn run_crap_cli() -> i32 {
             let cfile = trim_ascii(cov_files[cf_start..cf_end]);
             cf_start = cf_end + 1;
             guard cfile.len > 0 else { continue; }
-            load_gcrap_profile(cfile, branches);
+            if slice_ends_with(cfile, ".info") || slice_ends_with(cfile, ".lcov") {
+                load_lcov_profile(cfile, pool, functions, branches);
+            } else {
+                load_gcrap_profile(cfile, branches);
+            }
         }
     } else if lcov_file.len > 0 {
         load_lcov_profile(lcov_file, pool, functions, branches);
@@ -633,7 +632,13 @@ fn run_crap_cli() -> i32 {
 
     // 8. Save baseline snapshot if requested
     if save_baseline_file_path.len > 0 {
-        if save_baseline_file(save_baseline_file_path, target_path, pool, functions) {
+        if save_baseline_file(
+            save_baseline_file_path,
+            target_path,
+            pool,
+            functions,
+            cfg.has_coverage_profile,
+        ) {
             if is_machine_stdout {
                 write_stderr("Saved baseline snapshot to: ");
                 write_stderr(save_baseline_file_path);
@@ -650,7 +655,14 @@ fn run_crap_cli() -> i32 {
     var ratchet_failed = false;
     if baseline_file.len > 0 && !enforce_gate {
         var ratchet_report: u8[>..] = [];
-        let violations = check_ratchet_gate(baseline_file, pool, functions, delta_threshold, ratchet_report);
+        let violations = check_ratchet_gate(
+            baseline_file,
+            pool,
+            functions,
+            delta_threshold,
+            cfg.has_coverage_profile,
+            ratchet_report,
+        );
         if is_machine_stdout {
             write_stderr(ratchet_report[..]);
         } else {
@@ -747,6 +759,7 @@ fn run_crap_cli() -> i32 {
             baseline_file,
             delta_threshold,
             gate_ceiling,
+            cfg.has_coverage_profile,
         );
     }
 

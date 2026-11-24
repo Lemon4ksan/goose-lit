@@ -21,9 +21,8 @@ fn test_parse_config() {
     assert(cfg.has_gate_ceiling);
     assert(cfg.gate_ceiling > 18.4 && cfg.gate_ceiling < 18.6);
 
-    crap::parse_config_line("cov = 0.92", cfg);
-    assert(cfg.has_default_cov);
-    assert(cfg.default_cov > 0.91 && cfg.default_cov < 0.93);
+    crap::parse_config_line("cov_profile = .lit/cache/cov/merged.gcrap-cov", cfg);
+    assert(cfg.cov_profile_buf == ".lit/cache/cov/merged.gcrap-cov");
 
     crap::parse_config_line("delta = 4.0", cfg);
     assert(cfg.has_delta);

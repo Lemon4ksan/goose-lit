@@ -134,7 +134,6 @@ struct RiskConfig {
     untrusted_weight:     f64  = 1.5,
     classic_threshold:    f64  = 30.0,
     gcrap_threshold:      f64  = 25.0,
-    default_cov:          f64  = 0.0,
     has_coverage_profile: bool = false,
     bce_state:            u8   = 1,
 }
@@ -146,7 +145,6 @@ fn default_risk_config() -> RiskConfig {
         untrusted_weight:     1.5,
         classic_threshold:    30.0,
         gcrap_threshold:      25.0,
-        default_cov:          0.0,
         has_coverage_profile: false,
         bce_state:            1,
     };

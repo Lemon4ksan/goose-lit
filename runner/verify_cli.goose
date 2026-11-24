@@ -11,10 +11,11 @@ import sys.proc;
 import sys.config;
 
 struct VerifyCliArgs {
-    target:    const u8[:] = "",
-    max_gcrap: const u8[:] = "25",
-    lit_test:  const u8[:] = "",
-    cov_arg:   const u8[:] = "",
+    target:      const u8[:] = "",
+    max_gcrap:   const u8[:] = "25",
+    lit_test:    const u8[:] = "",
+    cov_arg:     const u8[:] = "",
+    require_cov: bool        = false,
 }
 
 fn parse_verify_cli_args(all_args: const (u8[:])[:], cfg: VerifyCliArgs&) -> bool {
@@ -22,7 +23,7 @@ fn parse_verify_cli_args(all_args: const (u8[:])[:], cfg: VerifyCliArgs&) -> boo
     while idx < all_args.len {
         let a = all_args[idx];
         if a == "--help" || a == "-h" {
-            write_stdout("Usage: goose-lit verify <target.goose> [--max-gcrap <val>] [--lit <test.goose>] [--cov <val|file>]\n");
+            write_stdout("Usage: goose-lit verify <target.goose> [--max-gcrap <val>] [--lit <test.goose>] [--cov <file>] [--require-cov]\n");
             return false;
         } else if a == "--max-gcrap" && idx + 1 < all_args.len {
             idx++;
@@ -33,6 +34,8 @@ fn parse_verify_cli_args(all_args: const (u8[:])[:], cfg: VerifyCliArgs&) -> boo
         } else if a == "--cov" && idx + 1 < all_args.len {
             idx++;
             cfg.cov_arg = all_args[idx];
+        } else if a == "--require-cov" {
+            cfg.require_cov = true;
         } else if a == "--config" && idx + 1 < all_args.len {
             idx++;
         } else if crap::slice_starts_with(a, "-") {
@@ -51,7 +54,7 @@ fn parse_verify_cli_args(all_args: const (u8[:])[:], cfg: VerifyCliArgs&) -> boo
         idx++;
     }
     if cfg.target.len == 0 {
-        write_stdout("Usage: goose-lit verify <target.goose> [--max-gcrap <val>] [--lit <test.goose>] [--cov <val|file>]\n");
+        write_stdout("Usage: goose-lit verify <target.goose> [--max-gcrap <val>] [--lit <test.goose>] [--cov <file>] [--require-cov]\n");
         return false;
     }
     return true;
@@ -105,8 +108,9 @@ fn handle_verify_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&
         gate_cmd.append(" --cov \"");
         gate_cmd.append(cfg.cov_arg);
         gate_cmd.push('"');
-    } else if lit_cfg.cov_profile_buf.len == 0 || !file_exists(lit_cfg.cov_profile_buf[..]) {
-        gate_cmd.append(" --cov 0.85");
+    }
+    if cfg.require_cov {
+        gate_cmd.append(" --require-cov");
     }
     out.clear();
     let gate_rc = crap::exec_capture(gate_cmd[..], out);

@@ -94,19 +94,19 @@ fn test_bug2_ratchet_bounded_buffer_wildcard_and_rounding_regression() {
     });
 
     var ratchet_out: u8[>..] = [];
-    let violations = crap::check_ratchet_gate(baseline_path, pool, functions, 5.0, ratchet_out);
+    let violations = crap::check_ratchet_gate(baseline_path, pool, functions, 5.0, true, ratchet_out);
     assert(violations == 1);
 
     functions[0].uncovered_bce_keep = 0;
     functions[0].g_crap = 25.004;
     functions[0].cov_branch = 0.85;
 
-    let saved_ok = crap::save_baseline_file(baseline_path, ".", pool, functions);
+    let saved_ok = crap::save_baseline_file(baseline_path, ".", pool, functions, true);
     assert(saved_ok);
 
     ratchet_out.clear();
-    let self_violations = crap::check_ratchet_gate(baseline_path, pool, functions, 0.0, ratchet_out);
-    let is_grandfathered = crap::is_grandfathered_in_baseline(baseline_path, pool, functions[0], 0.0);
+    let self_violations = crap::check_ratchet_gate(baseline_path, pool, functions, 0.0, true, ratchet_out);
+    let is_grandfathered = crap::is_grandfathered_in_baseline(baseline_path, pool, functions[0], 0.0, true);
     delete_file(baseline_path);
 
     assert(self_violations == 0);

@@ -210,15 +210,10 @@ fn aggregate_coverage_metrics(
                         uncov_ovf += branches[idx].ovf_ops;
                     }
                 } else {
-                    // Static triage mode: default coverage or 0.0
-                    if cfg.default_cov >= 1.0 {
-                        branches[idx].covered = true;
-                        covered_cnt++;
-                    } else {
-                        branches[idx].covered = false;
-                        uncov_bce_keep += branches[idx].bce_keep;
-                        uncov_ovf += branches[idx].ovf_ops;
-                    }
+                    // Static mode without profile: treat branches as uncovered
+                    branches[idx].covered = false;
+                    uncov_bce_keep += branches[idx].bce_keep;
+                    uncov_ovf += branches[idx].ovf_ops;
                 }
             }
         }
@@ -228,14 +223,14 @@ fn aggregate_coverage_metrics(
             if cfg.has_coverage_profile {
                 functions[fi].cov_branch = (covered_cnt as f64) / count;
             } else {
-                functions[fi].cov_branch = cfg.default_cov;
+                functions[fi].cov_branch = 0.0;
             }
         } else {
             // Function with 0 branches preserves prior covered_branches indicator
             functions[fi].cov_branch = if cfg.has_coverage_profile {
                 if prev_covered > 0 { 1.0 } else { 0.0 }
             } else {
-                cfg.default_cov
+                0.0
             };
         }
 

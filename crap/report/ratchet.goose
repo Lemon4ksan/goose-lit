@@ -31,13 +31,18 @@ fn round_f64_2(v: f64) -> f64 {
 
 // Saves current scan as a baseline snapshot.
 fn save_baseline_file(
-    baseline_path: const u8[:],
-    root_path:     const u8[:],
-    pool:          const u8[:],
-    functions:     const FunctionInfo[:],
+    baseline_path:        const u8[:],
+    root_path:            const u8[:],
+    pool:                 const u8[:],
+    functions:            const FunctionInfo[:],
+    has_coverage_profile: bool,
 ) -> bool {
     var out: u8[>..] = [];
-    out.append("# goose-crap baseline v2\n");
+    if has_coverage_profile {
+        out.append("# goose-crap baseline v2 mode=real\n");
+    } else {
+        out.append("# goose-crap baseline v2 mode=static\n");
+    }
     var norm_file: u8[>..] = [];
 
     for fi in functions.len {
@@ -67,11 +72,12 @@ fn save_baseline_file(
 // Evaluates ratchet gate against previous baseline.
 // Returns (violations_count, report_text).
 fn check_ratchet_gate(
-    baseline_path:   const u8[:],
-    pool:            const u8[:],
-    functions:       const FunctionInfo[:],
-    delta_threshold: f64,
-    out:             u8[>..]&,
+    baseline_path:        const u8[:],
+    pool:                 const u8[:],
+    functions:            const FunctionInfo[:],
+    delta_threshold:      f64,
+    has_coverage_profile: bool,
+    out:                  u8[>..]&,
 ) -> i32 {
     var content: u8[>..] = [];
     guard read_file(baseline_path, content) else {
@@ -82,6 +88,9 @@ fn check_ratchet_gate(
     }
 
     let is_v2 = slice_starts_with(content, "# goose-crap baseline v2");
+    let base_is_real = slice_starts_with(content, "# goose-crap baseline v2 mode=real");
+    let base_is_static = slice_starts_with(content, "# goose-crap baseline v2 mode=static");
+    let static_vs_real = base_is_real && !has_coverage_profile;
     var entries:    BaselineEntry[>..] = [];
     var line_start: i64                = 0;
     let n = content.len;
@@ -192,6 +201,11 @@ fn check_ratchet_gate(
     out.append("Baseline: ");
     out.append(baseline_path);
     out.append("\n");
+    if static_vs_real {
+        out.append("Notice: baseline was recorded with real coverage (mode=real); running static ratchet (unproven bce:keep only). Run 'goose-lit cov' for full G-CRAP ratchet.\n");
+    } else if !base_is_real && !base_is_static && has_coverage_profile {
+        out.append("Warning: baseline has no mode=real header (legacy format); regenerate with 'goose-lit crap . --save-baseline' after 'goose-lit cov'.\n");
+    }
 
     for fi in functions.len {
         let fn_info = functions[fi];
@@ -235,7 +249,7 @@ fn check_ratchet_gate(
                 out.append(" to ");
                 append_i64(out, fn_info.uncovered_bce_keep);
                 out.append("!\n");
-            } else if cur_gcrap_cmp > prev_gcrap + delta_threshold && fn_info.cov_branch < 0.99 {
+            } else if !static_vs_real && cur_gcrap_cmp > prev_gcrap + delta_threshold && fn_info.cov_branch < 0.99 {
                 violations++;
                 out.append("[VIOLATION] Function `");
                 out.append(cur_name);
@@ -273,16 +287,19 @@ fn check_ratchet_gate(
 // crap:trusted
 // crap:trusted-bounds
 fn is_grandfathered_in_baseline(
-    baseline_path:   const u8[:],
-    pool:            const u8[:],
-    fn_info:         const FunctionInfo&,
-    delta_threshold: f64,
+    baseline_path:        const u8[:],
+    pool:                 const u8[:],
+    fn_info:              const FunctionInfo&,
+    delta_threshold:      f64,
+    has_coverage_profile: bool,
 ) -> bool {
     guard baseline_path.len > 0 else { return false; }
     var content: u8[>..] = [];
     guard read_file(baseline_path, content) else { return false; }
 
     let is_v2 = slice_starts_with(content, "# goose-crap baseline v2");
+    let base_is_real = slice_starts_with(content, "# goose-crap baseline v2 mode=real");
+    let static_vs_real = base_is_real && !has_coverage_profile;
     let cur_name = pool_slice(pool, fn_info.qual_off, fn_info.qual_len);
     let cur_file = pool_slice(pool, fn_info.file_off, fn_info.file_len);
     let cur_gcrap_cmp = round_f64_2(fn_info.g_crap);
@@ -331,8 +348,12 @@ fn is_grandfathered_in_baseline(
                 let bce_val, ok_b = parse_i64_slice(bce_part);
                 if ok_l && ok_g && ok_b && gcrap_val == gcrap_val {
                     same_name_count++;
-                    let row_ok = fn_info.uncovered_bce_keep <= (bce_val as i32) &&
-                        (cur_gcrap_cmp <= gcrap_val + delta_threshold || fn_info.cov_branch >= 0.99);
+                    let row_ok = if static_vs_real {
+                        fn_info.uncovered_bce_keep <= (bce_val as i32)
+                    } else {
+                        fn_info.uncovered_bce_keep <= (bce_val as i32) &&
+                            (cur_gcrap_cmp <= gcrap_val + delta_threshold || fn_info.cov_branch >= 0.99)
+                    };
                     if (line_val as i32) == fn_info.start_line {
                         return row_ok;
                     }

@@ -7,12 +7,15 @@
 // RUN: goose %s
 // RUN: %lit cov wire/mutate.goose --tests tests/wire_test.goose --out %t.gcrap-cov --lcov %t.info | %FileCheck %s
 // RUN: %lit crap wire/mutate.goose --cov %t.gcrap-cov --no-bce | %FileCheck --prefix CRAP %s
+// RUN: %lit crap wire/mutate.goose --no-bce --no-baseline | %FileCheck --prefix STATIC %s
 // CHECK: Real Branch Coverage:
 // CHECK: Saved profile:
 // CHECK: Saved LCOV:
 // CRAP: === goose-crap risk radar (G-CRAP) ===
 // CRAP: lit::mutate_payload_once
 // CRAP: Total branch sites:      40
+// STATIC: N/A
+// STATIC: Coverage mode:           static
 
 import std;
 import lit from "..";

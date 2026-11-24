@@ -249,7 +249,7 @@ thread_fn cov_parallel_worker(cfg: CovWorkerCfg) {
         let _ = read_file(test_rel[..], test_src);
 
         cmd.clear();
-        cmd.append("goose build -O2");
+        cmd.append("goose build -O0");
         if cfg.cc.len > 0 {
             cmd.append(" --cc ");
             cmd.append(cfg.cc[..]);
@@ -271,7 +271,7 @@ thread_fn cov_parallel_worker(cfg: CovWorkerCfg) {
         cmd.append("..\\cov_bin_");
         if !cfg.is_win {
             cmd.clear();
-            cmd.append("goose build -O2");
+            cmd.append("goose build -O0");
             if cfg.cc.len > 0 {
                 cmd.append(" --cc ");
                 cmd.append(cfg.cc[..]);
@@ -393,6 +393,9 @@ fn handle_cov_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) -
     }
     if lit_cfg.has_gate_ceiling {
         cfg.gate_ceiling = lit_cfg.gate_ceiling;
+    }
+    if lit_cfg.has_timeout && lit_cfg.timeout_sec > 0 {
+        cfg.timeout_sec = lit_cfg.timeout_sec;
     }
     guard parse_cov_cli_args(all_args, cfg) else { return 2; }
     if cfg.src_target.len == 0 {
@@ -657,6 +660,7 @@ fn handle_cov_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) -
             lit_cfg.baseline_buf[..],
             if lit_cfg.has_delta { lit_cfg.delta_threshold } else { 5.0 },
             cfg.gate_ceiling,
+            true,
         );
         if gate_rc != 0 { return gate_rc; }
     }

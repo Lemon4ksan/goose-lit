@@ -27,8 +27,6 @@ struct LitConfig {
     fuzz_extra_libs_buf: u8[..256]  = [],
     gate_ceiling:        f64        = 25.0,
     has_gate_ceiling:    bool       = false,
-    default_cov:         f64        = 0.0,
-    has_default_cov:     bool       = false,
     delta_threshold:     f64        = 5.0,
     has_delta:           bool       = false,
     timeout_sec:         i64        = 60,
@@ -244,11 +242,6 @@ fn apply_numeric_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) ->
         return true;
     }
     if key == "cov" || key == "coverage" || key == "default_cov" {
-        let fval, ok = parse_f64_slice(val);
-        if ok {
-            cfg.default_cov = fval;
-            cfg.has_default_cov = true;
-        }
         return true;
     }
     if key == "delta" {
