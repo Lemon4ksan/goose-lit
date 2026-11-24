@@ -243,3 +243,97 @@ fn aggregate_coverage_metrics(
         functions[fi].uncovered_ovf_ops = uncov_ovf;
     }
 }
+
+// Writes all non-zero branch hit counters to a `.gcrap-cov` profile file.
+fn save_gcrap_profile(out_path: const u8[:], branches: const BranchSite[:]) -> bool {
+    var buf: u8[>..] = [];
+    buf.append("# goose-lit branch coverage profile\n");
+    for bi in branches.len {
+        let b = branches[bi];
+        if b.hits > 0 {
+            buf.append("id ");
+            format(buf, b.branch_id);
+            buf.push(' ');
+            append_u64(buf, b.hits);
+            buf.push('\n');
+        }
+    }
+    return write_file(out_path, buf[..]);
+}
+
+// Exports branch and function coverage in standard LCOV tracefile format.
+fn export_lcov_profile(
+    out_path:  const u8[:],
+    pool:      const u8[:],
+    functions: const FunctionInfo[:],
+    branches:  const BranchSite[:],
+) -> bool {
+    var out:       u8[>..]   = [];
+    var done_file: bool[>..] = [];
+    for _ in functions.len {
+        done_file.push(false);
+    }
+
+    for fi in functions.len {
+        guard !done_file[fi] else { continue; }
+        let sf = pool_slice(pool, functions[fi].file_off, functions[fi].file_len);
+        out.append("SF:");
+        out.append(sf);
+        out.push('\n');
+
+        // Emit all functions belonging to `sf`
+        for fj in fi..functions.len {
+            let f2 = pool_slice(pool, functions[fj].file_off, functions[fj].file_len);
+            guard f2 == sf else { continue; }
+            done_file[fj] = true;
+
+            let qn = pool_slice(pool, functions[fj].qual_off, functions[fj].qual_len);
+            out.append("FN:");
+            format(out, functions[fj].start_line);
+            out.push(',');
+            out.append(qn);
+            out.push('\n');
+
+            var fn_hits: u64 = 0;
+            if functions[fj].branch_count > 0 && functions[fj].first_branch < branches.len {
+                fn_hits = branches[functions[fj].first_branch].hits;
+            }
+            out.append("FNDA:");
+            append_u64(out, fn_hits);
+            out.push(',');
+            out.append(qn);
+            out.push('\n');
+        }
+
+        // Emit DA and BRDA records for all branches belonging to `sf`
+        for fj in fi..functions.len {
+            let f2 = pool_slice(pool, functions[fj].file_off, functions[fj].file_len);
+            guard f2 == sf else { continue; }
+            let first = functions[fj].first_branch;
+            let count = functions[fj].branch_count;
+            for bi in count {
+                let b_idx: i64 = first + bi;
+                guard b_idx < branches.len else { break; }
+                let b = branches[b_idx];
+                out.append("DA:");
+                format(out, b.start_line);
+                out.push(',');
+                append_u64(out, b.hits);
+                out.push('\n');
+
+                out.append("BRDA:");
+                format(out, b.start_line);
+                out.push(',');
+                format(out, fj);
+                out.push(',');
+                format(out, bi);
+                out.push(',');
+                append_u64(out, b.hits);
+                out.push('\n');
+            }
+        }
+        out.append("end_of_record\n");
+    }
+
+    return write_file(out_path, out[..]);
+}

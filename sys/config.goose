@@ -10,29 +10,36 @@ import os;
 import sys.bytes;
 
 struct LitConfig {
-    baseline_buf:      u8[..256]  = [],
-    tests_dir_buf:     u8[..256]  = [],
-    src_dir_buf:       u8[..256]  = [],
-    cc_buf:            u8[..256]  = [],
-    cc_source_buf:     u8[..32]   = [],
-    test_mode_buf:     u8[..32]   = [],
-    test_exec_buf:     u8[..256]  = [],
-    exclude_buf:       u8[..1024] = [],
-    format_buf:        u8[..32]   = [],
-    prefix_buf:        u8[..32]   = [],
-    gate_ceiling:      f64        = 25.0,
-    has_gate_ceiling:  bool       = false,
-    default_cov:       f64        = 0.0,
-    has_default_cov:   bool       = false,
-    delta_threshold:   f64        = 5.0,
-    has_delta:         bool       = false,
-    timeout_sec:       i64        = 60,
-    has_timeout:       bool       = false,
-    include_tests:     bool       = false,
-    has_include_tests: bool       = false,
-    bce_enabled:       bool       = true,
-    has_bce:           bool       = false,
-    loaded:            bool       = false,
+    baseline_buf:        u8[..256]  = [],
+    tests_dir_buf:       u8[..256]  = [],
+    src_dir_buf:         u8[..256]  = [],
+    cc_buf:              u8[..256]  = [],
+    cc_source_buf:       u8[..32]   = [],
+    test_mode_buf:       u8[..32]   = [],
+    test_exec_buf:       u8[..256]  = [],
+    exclude_buf:         u8[..1024] = [],
+    format_buf:          u8[..32]   = [],
+    prefix_buf:          u8[..32]   = [],
+    cov_profile_buf:     u8[..256]  = [],
+    profile_target_buf:  u8[..256]  = [],
+    fuzz_entry_buf:      u8[..256]  = [],
+    fuzz_extra_c_buf:    u8[..1024] = [],
+    fuzz_extra_libs_buf: u8[..256]  = [],
+    gate_ceiling:        f64        = 25.0,
+    has_gate_ceiling:    bool       = false,
+    default_cov:         f64        = 0.0,
+    has_default_cov:     bool       = false,
+    delta_threshold:     f64        = 5.0,
+    has_delta:           bool       = false,
+    timeout_sec:         i64        = 60,
+    has_timeout:         bool       = false,
+    jobs:                i64        = 0,
+    has_jobs:            bool       = false,
+    include_tests:       bool       = false,
+    has_include_tests:   bool       = false,
+    bce_enabled:         bool       = true,
+    has_bce:             bool       = false,
+    loaded:              bool       = false,
 }
 
 fn strip_config_value(raw: const u8[:]) -> const u8[:] {
@@ -180,6 +187,38 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
         }
         return true;
     }
+    if key == "cov_profile" {
+        set_bounded(cfg.cov_profile_buf, val);
+        return true;
+    }
+    if key == "profile_target" {
+        set_bounded(cfg.profile_target_buf, val);
+        return true;
+    }
+    if key == "fuzz_entry" {
+        set_bounded(cfg.fuzz_entry_buf, val);
+        return true;
+    }
+    if key == "fuzz_extra_c" {
+        cfg.fuzz_extra_c_buf.clear();
+        append_exclude_patterns(val, cfg.fuzz_extra_c_buf);
+        return true;
+    }
+    let host_os = native_host_os();
+    let is_os_libs = key == "fuzz_extra_libs" ||
+        (host_os == 1 && key == "fuzz_extra_libs_windows") ||
+        (host_os == 2 && key == "fuzz_extra_libs_linux") ||
+        (host_os == 3 && key == "fuzz_extra_libs_macos");
+    if is_os_libs {
+        var tmp_libs: u8[..1024] = [];
+        append_exclude_patterns(val, tmp_libs);
+        let n = min(tmp_libs.len, cfg.fuzz_extra_libs_buf.cap);
+        cfg.fuzz_extra_libs_buf.clear();
+        if n > 0 {
+            cfg.fuzz_extra_libs_buf.append(tmp_libs[..n]);
+        }
+        return true;
+    }
     return false;
 }
 
@@ -225,6 +264,14 @@ fn apply_numeric_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) ->
         if ok && ival > 0 {
             cfg.timeout_sec = ival;
             cfg.has_timeout = true;
+        }
+        return true;
+    }
+    if key == "jobs" {
+        let ival, ok = parse_i64_slice(val);
+        if ok && ival > 0 {
+            cfg.jobs = ival;
+            cfg.has_jobs = true;
         }
         return true;
     }

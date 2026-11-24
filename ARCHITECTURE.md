@@ -58,7 +58,11 @@ goose-lit/
 ├── check/
 │   └── filecheck.goose      # FileCheck directive parser and matcher
 ├── runner/
-│   └── lit_runner.goose     # // RUN: directive parser and test discoverer
+│   └── lit_runner.goose     # // RUN: directive parser, %alloc_hook/%prof_hook/%fuzz_driver
+├── profile/
+│   └── cli.goose            # Stage profiler & testing.B benchstat CLI runner
+├── fuzz/
+│   └── cli.goose            # SanCov / libFuzzer build & campaign CLI runner
 ├── wire/
 │   ├── edge.goose           # Page-edge layout, hex decoder, split stream verifier
 │   └── mutate.goose         # xorshift64 payload mutator
@@ -72,9 +76,12 @@ goose-lit/
 │   ├── cli.goose            # CLI argument parser for crap mode
 │   └── crap.goose           # Subsystem export facade
 ├── testkit/
+│   ├── alloc.goose          # Runtime allocation counter & zero-alloc assertions
 │   ├── assert.goose         # Unit assertions (assert_eq, assert_true, etc.)
+│   ├── bench.goose          # Microbenchmark latency budget & parity checks
 │   ├── diff.goose           # Unified line-diff engine for failures
 │   ├── mock.goose           # Function call recorders and mocks
+│   ├── profile.goose        # Stage profiler spans & testing.B bench suite API
 │   ├── runner.goose         # In-process test suite and case runners
 │   └── testkit.goose        # thread_spawn_contained helpers
 ├── sys/
@@ -83,7 +90,12 @@ goose-lit/
 │   ├── proc.goose           # Process execution, cached temp output capture
 │   └── time.goose           # Monotonic timers
 ├── shim/
-│   └── proc.c               # C11 subprocess runner and atomic counters
+│   ├── alloc_count.c        # Runtime pool allocation & stack watermark counter
+│   ├── alloc_hook.h         # Compile-time interposition header (%alloc_hook)
+│   ├── fuzz_driver.c        # SanCov 64 KB edge-bitmap & libFuzzer C driver
+│   ├── proc.c               # C11 subprocess runner and atomic counters
+│   ├── prof_hook.h          # Profiler & memory interposition header (%prof_hook)
+│   └── profiler.c           # Cycle-accurate stage profiler & bench engine
 ├── tests/
 │   ├── filecheck_test.goose # Unit tests for FileCheck directives
 │   ├── wire_test.goose      # Split-stream and mutator tests

@@ -33,12 +33,18 @@
 #define GCRAP_WEAK
 #endif
 
-typedef struct { const uint8_t *data; int64_t len; } crap_bytes_ro;
+typedef struct {
+    const uint8_t *data;
+    int64_t len;
+} crap_bytes_ro;
 
-#define GCRAP_MAX_BRANCHES 65536
+#define GCRAP_MAX_BRANCHES 262144
 
 static uint64_t g_crap_hits[GCRAP_MAX_BRANCHES];
 static int g_crap_atexit_registered = 0;
+static uint64_t g_crap_seq = 0;
+static int32_t g_crap_work_next = 0;
+static int32_t g_crap_stop_flag = 0;
 
 static void crap_slice_to_cstr(crap_bytes_ro s, char *out, size_t max_out) {
     if (!s.data || s.len <= 0 || max_out == 0) {
@@ -54,7 +60,8 @@ static int crap_write_hits_to_file(const char *path) {
     if (!path || !path[0]) return -1;
     char clean_path[4096];
     size_t len = strlen(path);
-    while (len > 0 && (path[len - 1] == ' ' || path[len - 1] == '\t' || path[len - 1] == '\r' || path[len - 1] == '\n')) {
+    while (len > 0 &&
+           (path[len - 1] == ' ' || path[len - 1] == '\t' || path[len - 1] == '\r' || path[len - 1] == '\n')) {
         len--;
     }
     if (len == 0 || len >= sizeof(clean_path)) return -1;
@@ -104,9 +111,7 @@ GCRAP_WEAK void crap_cov_hit(int32_t id) {
 }
 
 // Resets all in-memory branch counters to zero.
-GCRAP_WEAK void crap_cov_reset(void) {
-    memset(g_crap_hits, 0, sizeof(g_crap_hits));
-}
+GCRAP_WEAK void crap_cov_reset(void) { memset(g_crap_hits, 0, sizeof(g_crap_hits)); }
 
 // Reads the current hit count for a specific branch ID.
 GCRAP_WEAK int64_t crap_cov_get(int32_t id) {
@@ -123,11 +128,67 @@ GCRAP_WEAK int32_t crap_cov_dump(crap_bytes_ro path) {
     return (int32_t)crap_write_hits_to_file(cpath);
 }
 
-static volatile int32_t g_last_exec_timed_out = 0;
+#if defined(_MSC_VER)
+__declspec(thread) static volatile int32_t g_last_exec_timed_out = 0;
+#else
+_Thread_local static volatile int32_t g_last_exec_timed_out = 0;
+#endif
 
-GCRAP_WEAK int32_t crap_last_exec_timed_out(void) {
-    return g_last_exec_timed_out;
+GCRAP_WEAK uint64_t crap_next_seq(void) {
+#if defined(__GNUC__) || defined(__clang__)
+    return __atomic_add_fetch(&g_crap_seq, 1ULL, __ATOMIC_RELAXED);
+#elif defined(_MSC_VER)
+    return (uint64_t)InterlockedIncrement64((volatile LONG64 *)&g_crap_seq);
+#else
+    return ++g_crap_seq;
+#endif
 }
+
+GCRAP_WEAK void crap_work_reset(void) {
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_store_n(&g_crap_work_next, 0, __ATOMIC_SEQ_CST);
+    __atomic_store_n(&g_crap_stop_flag, 0, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+    InterlockedExchange((volatile LONG *)&g_crap_work_next, 0);
+    InterlockedExchange((volatile LONG *)&g_crap_stop_flag, 0);
+#else
+    g_crap_work_next = 0;
+    g_crap_stop_flag = 0;
+#endif
+}
+
+GCRAP_WEAK int32_t crap_work_claim(int32_t total) {
+#if defined(__GNUC__) || defined(__clang__)
+    int32_t idx = __atomic_fetch_add(&g_crap_work_next, 1, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+    int32_t idx = (int32_t)InterlockedExchangeAdd((volatile LONG *)&g_crap_work_next, 1);
+#else
+    int32_t idx = g_crap_work_next++;
+#endif
+    return (idx >= 0 && idx < total) ? idx : -1;
+}
+
+GCRAP_WEAK void crap_atomic_set_stop(int32_t v) {
+#if defined(__GNUC__) || defined(__clang__)
+    __atomic_store_n(&g_crap_stop_flag, v, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+    InterlockedExchange((volatile LONG *)&g_crap_stop_flag, v);
+#else
+    g_crap_stop_flag = v;
+#endif
+}
+
+GCRAP_WEAK int32_t crap_atomic_get_stop(void) {
+#if defined(__GNUC__) || defined(__clang__)
+    return __atomic_load_n(&g_crap_stop_flag, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+    return (int32_t)InterlockedCompareExchange((volatile LONG *)&g_crap_stop_flag, 0, 0);
+#else
+    return g_crap_stop_flag;
+#endif
+}
+
+GCRAP_WEAK int32_t crap_last_exec_timed_out(void) { return g_last_exec_timed_out; }
 
 GCRAP_WEAK int32_t crap_setenv(crap_bytes_ro key, crap_bytes_ro val) {
     char ckey[512], cval[4096];
@@ -217,21 +278,15 @@ GCRAP_WEAK int32_t crap_exec_to_file(crap_bytes_ro cmd, crap_bytes_ro out_path) 
 }
 
 #ifdef _WIN32
-static int32_t crap_win32_spawn_and_wait(wchar_t *w_cmd, const wchar_t *w_out, int32_t timeout_ms) {
+static int32_t crap_win32_spawn_and_wait_dir(wchar_t *w_cmd, const wchar_t *w_out, const wchar_t *w_dir,
+                                             int32_t timeout_ms) {
     SECURITY_ATTRIBUTES sa;
     memset(&sa, 0, sizeof(sa));
     sa.nLength = sizeof(sa);
     sa.bInheritHandle = TRUE;
 
-    HANDLE hOut = CreateFileW(
-        w_out,
-        GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        &sa,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
+    HANDLE hOut = CreateFileW(w_out, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &sa,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hOut == INVALID_HANDLE_VALUE) return -1;
 
     HANDLE hJob = CreateJobObjectW(NULL, NULL);
@@ -252,7 +307,7 @@ static int32_t crap_win32_spawn_and_wait(wchar_t *w_cmd, const wchar_t *w_out, i
     si.hStdError = hOut;
     si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
 
-    if (!CreateProcessW(NULL, w_cmd, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+    if (!CreateProcessW(NULL, w_cmd, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, w_dir, &si, &pi)) {
         if (hJob != NULL) CloseHandle(hJob);
         CloseHandle(hOut);
         return -1;
@@ -284,6 +339,10 @@ static int32_t crap_win32_spawn_and_wait(wchar_t *w_cmd, const wchar_t *w_out, i
     }
     CloseHandle(hOut);
     return (int32_t)exit_code;
+}
+
+static int32_t crap_win32_spawn_and_wait(wchar_t *w_cmd, const wchar_t *w_out, int32_t timeout_ms) {
+    return crap_win32_spawn_and_wait_dir(w_cmd, w_out, NULL, timeout_ms);
 }
 
 static size_t crap_append_win_quoted_arg(char *dst, size_t cap, size_t pos, const char *arg) {
@@ -378,14 +437,8 @@ GCRAP_WEAK int32_t crap_exec_to_file_timeout(crap_bytes_ro cmd, crap_bytes_ro ou
 }
 
 // Executes a program directly with up to 3 arguments without invoking a shell.
-GCRAP_WEAK int32_t crap_exec_argv_to_file(
-    crap_bytes_ro prog,
-    crap_bytes_ro arg1,
-    crap_bytes_ro arg2,
-    crap_bytes_ro arg3,
-    crap_bytes_ro out_path,
-    int32_t timeout_ms
-) {
+GCRAP_WEAK int32_t crap_exec_argv_to_file(crap_bytes_ro prog, crap_bytes_ro arg1, crap_bytes_ro arg2,
+                                          crap_bytes_ro arg3, crap_bytes_ro out_path, int32_t timeout_ms) {
     g_last_exec_timed_out = 0;
     char c_prog[1024], c_arg1[1024], c_arg2[1024], c_arg3[4096], c_out[4096];
     crap_slice_to_cstr(prog, c_prog, sizeof(c_prog));
@@ -610,3 +663,155 @@ GCRAP_WEAK int32_t crap_cpu_count(void) {
 #endif
 }
 
+GCRAP_WEAK int64_t crap_file_mtime(crap_bytes_ro path) {
+    char cpath[4096];
+    crap_slice_to_cstr(path, cpath, sizeof(cpath));
+    if (!cpath[0]) return -1;
+#ifdef _WIN32
+    wchar_t wpath[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, cpath, -1, wpath, 4096) <= 0) return -1;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!GetFileAttributesExW(wpath, GetFileExInfoStandard, &fad)) return -1;
+    ULARGE_INTEGER uli;
+    uli.LowPart = fad.ftLastWriteTime.dwLowDateTime;
+    uli.HighPart = fad.ftLastWriteTime.dwHighDateTime;
+    return (int64_t)uli.QuadPart;
+#else
+    struct stat st;
+    if (stat(cpath, &st) != 0) return -1;
+    return (int64_t)st.st_mtime;
+#endif
+}
+
+GCRAP_WEAK int64_t crap_file_size(crap_bytes_ro path) {
+    char cpath[4096];
+    crap_slice_to_cstr(path, cpath, sizeof(cpath));
+    if (!cpath[0]) return -1;
+#ifdef _WIN32
+    wchar_t wpath[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, cpath, -1, wpath, 4096) <= 0) return -1;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!GetFileAttributesExW(wpath, GetFileExInfoStandard, &fad)) return -1;
+    ULARGE_INTEGER uli;
+    uli.LowPart = fad.nFileSizeLow;
+    uli.HighPart = fad.nFileSizeHigh;
+    return (int64_t)uli.QuadPart;
+#else
+    struct stat st;
+    if (stat(cpath, &st) != 0) return -1;
+    return (int64_t)st.st_size;
+#endif
+}
+
+GCRAP_WEAK int32_t crap_exec_in_dir_with_env(crap_bytes_ro dir, crap_bytes_ro cmd, crap_bytes_ro env_key,
+                                              crap_bytes_ro env_val, crap_bytes_ro out_path, int32_t timeout_ms) {
+    g_last_exec_timed_out = 0;
+    char c_dir[4096], c_cmd[8192], c_key[256], c_val[4096], c_out[4096];
+    crap_slice_to_cstr(dir, c_dir, sizeof(c_dir));
+    crap_slice_to_cstr(cmd, c_cmd, sizeof(c_cmd));
+    crap_slice_to_cstr(env_key, c_key, sizeof(c_key));
+    crap_slice_to_cstr(env_val, c_val, sizeof(c_val));
+    crap_slice_to_cstr(out_path, c_out, sizeof(c_out));
+    if (!c_cmd[0] || !c_out[0]) return -1;
+
+#ifdef _WIN32
+    char abs_val[4096];
+    const char *eff_val = c_val;
+    if (c_key[0] && c_val[0] && (strchr(c_val, '/') != NULL || strchr(c_val, '\\') != NULL)) {
+        if (GetFullPathNameA(c_val, sizeof(abs_val), abs_val, NULL) > 0) {
+            eff_val = abs_val;
+        }
+    }
+    char inner_cmd[16384];
+    if (c_key[0]) {
+        snprintf(inner_cmd, sizeof(inner_cmd), "set \"%s=%s\" && %s", c_key, eff_val, c_cmd);
+    } else {
+        snprintf(inner_cmd, sizeof(inner_cmd), "%s", c_cmd);
+    }
+    char full_cmd[16448];
+    snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /S /C \"%s\"", inner_cmd);
+
+    wchar_t w_cmd[16448];
+    wchar_t w_out[4096];
+    wchar_t w_dir[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, full_cmd, -1, w_cmd, 16448) <= 0) return -1;
+    if (MultiByteToWideChar(CP_UTF8, 0, c_out, -1, w_out, 4096) <= 0) return -1;
+    const wchar_t *p_dir = NULL;
+    if (c_dir[0]) {
+        if (MultiByteToWideChar(CP_UTF8, 0, c_dir, -1, w_dir, 4096) <= 0) return -1;
+        p_dir = w_dir;
+    }
+    return crap_win32_spawn_and_wait_dir(w_cmd, w_out, p_dir, timeout_ms);
+#else
+    char abs_val[4096];
+    const char *eff_val = c_val;
+    if (c_key[0] && c_val[0] && c_val[0] != '/' && (strchr(c_val, '/') != NULL)) {
+        char cwd[4096];
+        if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            snprintf(abs_val, sizeof(abs_val), "%s/%s", cwd, c_val);
+            eff_val = abs_val;
+        }
+    }
+    int out_fd = open(c_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out_fd < 0) return -1;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(out_fd);
+        return -1;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        if (c_dir[0]) {
+            if (chdir(c_dir) != 0) _exit(127);
+        }
+        if (c_key[0]) {
+            setenv(c_key, eff_val, 1);
+        }
+        dup2(out_fd, STDOUT_FILENO);
+        dup2(out_fd, STDERR_FILENO);
+        close(out_fd);
+        execl("/bin/sh", "sh", "-c", c_cmd, (char *)NULL);
+        _exit(127);
+    }
+    close(out_fd);
+    setpgid(pid, pid);
+
+    struct timespec start_ts, now_ts, sleep_ts;
+    clock_gettime(CLOCK_MONOTONIC, &start_ts);
+    sleep_ts.tv_sec = 0;
+    sleep_ts.tv_nsec = 5 * 1000 * 1000;
+
+    int status = 0;
+    for (;;) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) {
+            if (WIFEXITED(status)) return (int32_t)WEXITSTATUS(status);
+            if (WIFSIGNALED(status)) return (int32_t)(128 + WTERMSIG(status));
+            return (int32_t)status;
+        }
+        if (w < 0) return -1;
+
+        if (timeout_ms > 0) {
+            clock_gettime(CLOCK_MONOTONIC, &now_ts);
+            int64_t elapsed_ms = (int64_t)(now_ts.tv_sec - start_ts.tv_sec) * 1000LL +
+                                 (int64_t)(now_ts.tv_nsec - start_ts.tv_nsec) / 1000000LL;
+            if (elapsed_ms >= (int64_t)timeout_ms) {
+                g_last_exec_timed_out = 1;
+                kill(-pid, SIGTERM);
+                nanosleep(&sleep_ts, NULL);
+                kill(-pid, SIGKILL);
+                waitpid(pid, &status, 0);
+                return 124;
+            }
+        }
+        nanosleep(&sleep_ts, NULL);
+    }
+#endif
+}
+
+GCRAP_WEAK int32_t crap_exec_with_env_to_file(crap_bytes_ro cmd, crap_bytes_ro env_key, crap_bytes_ro env_val,
+                                               crap_bytes_ro out_path, int32_t timeout_ms) {
+    crap_bytes_ro empty_dir = {NULL, 0};
+    return crap_exec_in_dir_with_env(empty_dir, cmd, env_key, env_val, out_path, timeout_ms);
+}

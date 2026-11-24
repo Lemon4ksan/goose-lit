@@ -110,11 +110,54 @@ fn append_compiler_options(cmd: u8[>..]&) {
     }
 }
 
+fn bce_cache_key_hex(entry: const u8[:], mtime: i64, size: i64, out: u8[>..]&) {
+    var raw: u8[>..] = [];
+    raw.append(entry);
+    raw.push(':');
+    append_i64(raw, mtime);
+    raw.push(':');
+    append_i64(raw, size);
+
+    var h: u64 = 14695981039346656037;
+    for b in raw {
+        h = (h ^ b) * 1099511628211;
+    }
+    let hex_chars: const u8[:] = "0123456789abcdef";
+    var sh: i64 = 60;
+    while sh >= 0 {
+        let nib = ((h >> (sh as u64)) & 0xF) as i64;
+        out.push(hex_chars[nib]);
+        sh -= 4;
+    }
+}
+
 // Executes `goose --bce-lines --check` on target and captures diagnostic output without shell invocation.
+// Caches output by `(entry, mtime, size)` in `.lit/cache/bce_<hex>.txt` unless `GCRAP_NO_CACHE` is set.
 fn run_goose_bce_lines(target_path: const u8[:], out: u8[>..]&) -> i32 {
     var entry: u8[>..] = [];
     resolve_package_entry_point(target_path, entry);
-    return exec_argv_capture("goose", "--bce-lines", "--check", entry[..], 0, out);
+
+    var no_cache_val: u8[>..] = [];
+    let use_cache = !env("GCRAP_NO_CACHE", no_cache_val) || no_cache_val.len == 0;
+    let mtime = native_file_mtime(entry[..]);
+    let fsize = native_file_size(entry[..]);
+
+    var cache_path: u8[>..] = [];
+    if use_cache && mtime >= 0 && fsize >= 0 {
+        ensure_lit_cache_dir();
+        cache_path.append(".lit/cache/bce_");
+        bce_cache_key_hex(entry[..], mtime, fsize, cache_path);
+        cache_path.append(".txt");
+        if file_exists(cache_path[..]) && read_file(cache_path[..], out) {
+            return 0;
+        }
+    }
+
+    let rc = exec_argv_capture("goose", "--bce-lines", "--check", entry[..], 0, out);
+    if rc == 0 && cache_path.len > 0 && out.len > 0 {
+        let _ = write_file(cache_path[..], out[..]);
+    }
+    return rc;
 }
 
 // Executes `goose --specs --check` on target and captures specialization output without shell invocation.

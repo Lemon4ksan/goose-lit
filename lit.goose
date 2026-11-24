@@ -30,9 +30,18 @@ import testkit.mock;
 import testkit.runner;
 import testkit.testkit;
 import testkit.bench;
+import testkit.alloc;
+import testkit.profile;
 
 // ---- lit runner engine ----------------------------------------------------
 import runner.lit_runner;
+import runner.check_cli;
+import runner.verify_cli;
 
 // ---- integrated goose-crap safety radar -----------------------------------
 import crap.crap;
+
+// ---- real coverage, stage profiler & coverage-guided fuzz CLI engines ------
+import cov.cli;
+import profile.cli;
+import fuzz.cli;

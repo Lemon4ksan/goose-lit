@@ -12,17 +12,26 @@ const LIT_VERSION_BYTES: const u8[:] = embed_file("version.txt");
 
 fn print_usage() {
     write_stdout("Usage: goose-lit [subcommand|path] [options]\n\n");
-    write_stdout("Test runner, FileCheck matcher, binary wire stream verifier, and G-CRAP risk analyzer for Goose.\n\n");
+    write_stdout("Test runner, FileCheck matcher, real branch coverage, profiler, fuzzer, and G-CRAP gate.\n\n");
     write_stdout("Subcommands:\n");
     write_stdout("  <path|file.goose>      Run // RUN: test directives in file or directory\n");
+    write_stdout("  check <path...>        Typecheck .goose files in parallel (-j N, --filter <glob>)\n");
+    write_stdout("  cov <src_target>       Instrument, run tests, merge .gcrap-cov & export LCOV\n");
+    write_stdout("  verify <target.goose>  Format check, typecheck, G-CRAP gate, and optional --lit\n");
     write_stdout("  filecheck <file>       Verify standard input against FileCheck directives in <file>\n");
     write_stdout("  not <command...>       Execute command and invert exit status (0 -> 1, non-zero -> 0)\n");
     write_stdout("  gate <path|file> [max] Verify G-CRAP complexity and bounds safety gate (default ceiling: 25)\n");
     write_stdout("  crap <path|file>       Run integrated G-CRAP complexity and safety risk radar\n");
+    write_stdout("  profile [bench.goose]  Build and run stage profiler / testing.B benchmark suite\n");
+    write_stdout("  fuzz [entry.goose]     Build and run SanCov / libFuzzer coverage-guided fuzzer\n");
     write_stdout("  inspect <file|hex>     Dump byte buffer in hex/ASCII or 128-bit SIMD lanes\n");
     write_stdout("  version, -V, --version Print version\n");
     write_stdout("  help, -h, --help       Print this help message\n\n");
     write_stdout("Options:\n");
+    write_stdout("  -j, --jobs <N>         Number of parallel workers (default: auto / .litconfig)\n");
+    write_stdout("  --filter <glob>        Filter test or source paths by wildcard glob (*, ?)\n");
+    write_stdout("  --fail-fast, -x        Stop scheduling new tests after first failure\n");
+    write_stdout("  --json                 Emit structured JSON test summary\n");
     write_stdout("  --config <file>        Load custom configuration file (default: .litconfig)\n");
     write_stdout("  --prefix <PREF>        FileCheck match prefix (default: CHECK)\n");
     write_stdout("  --verbose, -v          Verbose output of commands and matching\n");
@@ -96,11 +105,110 @@ fn handle_filecheck(file_arg: const u8[:], prefix_arg: const u8[:]) -> i32 {
     return 0;
 }
 
+struct LitWorkerCfg {
+    list_path:   u8[..256] = [],
+    timeout_sec: i64       = 60,
+    total:       i32       = 0,
+    verbose:     bool      = false,
+    fail_fast:   bool      = false,
+}
+
+fn lit_status_code(st: lit::TestStatus) -> i32 {
+    return match st {
+        Pass => 0,
+        Fail => 1,
+        XFail => 2,
+        XPass => 3,
+        Unsupported => 4,
+        Timeout => 5,
+    };
+}
+
+fn lit_get_line_at(blob: const u8[:], idx: i32, out: u8[>..]&) -> bool {
+    var cur:   i32 = 0;
+    var start: i64 = 0;
+    while start < blob.len {
+        let rel_nl = crap::slice_index_of_byte(blob[start..], '\n');
+        let end = if rel_nl >= 0 { start + rel_nl } else { blob.len };
+        if cur == idx {
+            out.append(crap::trim_ascii(blob[start..end]));
+            return out.len > 0;
+        }
+        cur++;
+        start = end + 1;
+    }
+    return false;
+}
+
+fn filter_test_list(raw: const u8[:], filter_glob: const u8[:], out: u8[>..]&) -> i32 {
+    var total: i32 = 0;
+    var start: i64 = 0;
+    while start < raw.len {
+        let rel_nl = crap::slice_index_of_byte(raw[start..], '\n');
+        let end = if rel_nl >= 0 { start + rel_nl } else { raw.len };
+        let fp = crap::trim_ascii(raw[start..end]);
+        start = end + 1;
+        guard fp.len > 0 else { continue; }
+        if filter_glob.len > 0 {
+            let last_sl = crap::slice_last_index_of_byte(fp, '/');
+            let base = if last_sl >= 0 { fp[last_sl + 1..] } else { fp };
+            if !crap::glob_match(filter_glob, fp) && !crap::glob_match(filter_glob, base) {
+                continue;
+            }
+        }
+        out.append(fp);
+        out.push('\n');
+        total++;
+    }
+    return total;
+}
+
+thread_fn lit_parallel_worker(cfg: LitWorkerCfg) {
+    var list_blob: u8[>..] = [];
+    guard read_file(cfg.list_path[..], list_blob) else { return; }
+
+    var fpath:     u8[>..] = [];
+    var slot_path: u8[>..] = [];
+    var slot_buf:  u8[>..] = [];
+
+    while true {
+        if cfg.fail_fast && crap::native_atomic_get_stop() != 0 {
+            break;
+        }
+        let idx = crap::native_work_claim(cfg.total);
+        if idx < 0 { break; }
+
+        fpath.clear();
+        guard lit_get_line_at(list_blob[..], idx, fpath) else { continue; }
+
+        var res = lit::TestResult { .. };
+        let _ = lit::run_single_lit_test_with_timeout(fpath[..], cfg.verbose, cfg.timeout_sec, res);
+        let sc = lit_status_code(res.status);
+        if cfg.fail_fast && (sc == 1 || sc == 3 || sc == 5) {
+            crap::native_atomic_set_stop(1);
+        }
+
+        slot_buf.clear();
+        format(slot_buf, sc, " ", res.duration_us, "\n");
+        slot_buf.append(res.diag[..]);
+
+        slot_path.clear();
+        slot_path.append(".lit/cache/.lit_slot_");
+        format(slot_path, idx);
+        slot_path.append(".res");
+        let _ = write_file(slot_path[..], slot_buf[..]);
+    }
+}
+
 fn run_lit_suite(
     target_path: const u8[:],
     verbose:     bool,
     list_only:   bool,
     allow_empty: bool,
+    jobs:        i64,
+    filter_glob: const u8[:],
+    fail_fast:   bool,
+    json_out:    bool,
     lit_cfg:     const crap::LitConfig&,
 ) -> i32 {
     if !file_exists(target_path) && !is_dir(target_path) {
@@ -116,20 +224,36 @@ fn run_lit_suite(
             write_stdout("\n");
             return 0;
         }
-        var listed: u8[>..] = [];
-        let lcount = lit::discover_test_files_filtered(target_path, lit_cfg.exclude_buf[..], listed);
+        var raw_listed: u8[>..] = [];
+        let _ = lit::discover_test_files_filtered(target_path, lit_cfg.exclude_buf[..], raw_listed);
+        var filtered_list: u8[>..] = [];
+        let lcount = filter_test_list(raw_listed[..], filter_glob, filtered_list);
         if lcount == 0 {
             return if allow_empty { 0 } else { 2 };
         }
-        write_stdout(listed[..]);
+        write_stdout(filtered_list[..]);
         return 0;
     }
 
-    write_stdout("=== Goose LIT Test Runner ===\n");
+    if !json_out {
+        write_stdout("=== Goose LIT Test Runner ===\n");
+    }
 
     if file_exists(target_path) && !is_dir(target_path) {
         var res = lit::TestResult { .. };
-        let ok = lit::run_single_lit_test_with_timeout(target_path, verbose, lit_cfg.timeout_sec, res);
+        let _ = lit::run_single_lit_test_with_timeout(target_path, verbose, lit_cfg.timeout_sec, res);
+        let sc = lit_status_code(res.status);
+        if json_out {
+            var jb: u8[>..] = [];
+            jb.append("{\"passed\": ");
+            format(jb, if sc == 0 { 1 } else { 0 }, ", \"failed\": ");
+            format(jb, if sc == 1 || sc == 3 || sc == 5 { 1 } else { 0 }, ", \"xfailed\": ");
+            format(jb, if sc == 2 { 1 } else { 0 }, ", \"unsupported\": ");
+            format(jb, if sc == 4 { 1 } else { 0 }, ", \"duration_ms\": ");
+            format(jb, res.duration_us / 1000, "}\n");
+            write_stdout(jb[..]);
+            return if sc == 0 || sc == 2 || sc == 4 { 0 } else { 1 };
+        }
         if res.status == lit::TestStatus.Pass {
             write_stdout("PASS: ");
             write_stdout(target_path);
@@ -174,13 +298,17 @@ fn run_lit_suite(
         }
     }
 
+    var raw_files: u8[>..] = [];
+    let _ = lit::discover_test_files_filtered(target_path, lit_cfg.exclude_buf[..], raw_files);
     var test_files: u8[>..] = [];
-    let count = lit::discover_test_files_filtered(target_path, lit_cfg.exclude_buf[..], test_files);
+    let total = filter_test_list(raw_files[..], filter_glob, test_files);
 
-    if count == 0 {
-        write_stdout("No test files found in ");
-        write_stdout(target_path);
-        write_stdout("\n");
+    if total == 0 {
+        if !json_out {
+            write_stdout("No test files found in ");
+            write_stdout(target_path);
+            write_stdout("\n");
+        }
         return if allow_empty { 0 } else { 2 };
     }
 
@@ -191,66 +319,199 @@ fn run_lit_suite(
     var unsupported_count: i64 = 0;
     var total_time_us:     i64 = 0;
 
-    var cur: i64 = 0;
-    let n = test_files.len;
+    let eff_jobs = if jobs > 0 {
+        jobs
+    } else if lit_cfg.has_jobs && lit_cfg.jobs > 0 {
+        lit_cfg.jobs
+    } else {
+        1
+    };
 
-    while cur < n {
-        let start = cur;
-        while cur < n && test_files[cur] != '\n' {
+    if eff_jobs > 1 && total > 1 {
+        crap::ensure_lit_cache_dir();
+        let list_path: const u8[:] = ".lit/cache/.lit_tests.list";
+        let _ = write_file(list_path, test_files[..]);
+        let n_workers = min(eff_jobs, total);
+
+        crap::native_work_reset();
+        var wcfg = LitWorkerCfg {
+            timeout_sec: lit_cfg.timeout_sec,
+            total:       total,
+            verbose:     verbose,
+            fail_fast:   fail_fast,
+        };
+        let _ = crap::set_bounded(wcfg.list_path, list_path);
+
+        var tids: i64[>..] = [];
+        for _ in n_workers {
+            tids.push(thread_spawn(lit_parallel_worker, wcfg));
+        }
+        for ti in tids.len {
+            var why: u8[>..] = [];
+            let _ = thread_wait(tids[ti], why);
+        }
+
+        var fp_buf:    u8[>..] = [];
+        var slot_path: u8[>..] = [];
+        var slot_data: u8[>..] = [];
+
+        for idx in total {
+            fp_buf.clear();
+            let _ = lit_get_line_at(test_files[..], idx, fp_buf);
+            slot_path.clear();
+            slot_path.append(".lit/cache/.lit_slot_");
+            format(slot_path, idx);
+            slot_path.append(".res");
+
+            slot_data.clear();
+            if read_file(slot_path[..], slot_data) {
+                delete_file(slot_path[..]);
+                let nl = crap::slice_index_of_byte(slot_data[..], '\n');
+                let head = if nl >= 0 { slot_data[..nl] } else { slot_data[..] };
+                let diag = if nl >= 0 && nl + 1 < slot_data.len { slot_data[nl + 1..] } else { "" };
+                let sp = crap::slice_index_of_byte(head, ' ');
+                let sc_str = if sp > 0 { head[..sp] } else { head };
+                let dur_str = if sp > 0 && sp + 1 < head.len { head[sp + 1..] } else { "0" };
+                let sc, _ = crap::parse_i64_slice(sc_str);
+                let dur_us, _ = crap::parse_i64_slice(dur_str);
+                total_time_us += dur_us;
+
+                if sc == 0 {
+                    passed_count += 1;
+                    if !json_out {
+                        var line: u8[>..] = [];
+                        line.append("  [PASS] ");
+                        line.append(fp_buf[..]);
+                        format(line, " (", dur_us / 1000, " ms)\n");
+                        write_stdout(line[..]);
+                    }
+                } else if sc == 2 {
+                    xfail_count += 1;
+                    if !json_out {
+                        var line: u8[>..] = [];
+                        line.append("  [XFAIL] ");
+                        line.append(fp_buf[..]);
+                        format(line, " (", dur_us / 1000, " ms)\n");
+                        write_stdout(line[..]);
+                    }
+                } else if sc == 4 {
+                    unsupported_count += 1;
+                    if !json_out {
+                        write_stdout("  [UNSUPPORTED] ");
+                        write_stdout(fp_buf[..]);
+                        write_stdout("\n");
+                    }
+                } else if sc == 5 {
+                    failed_count += 1;
+                    if !json_out {
+                        write_stdout("  [TIMEOUT] ");
+                        write_stdout(fp_buf[..]);
+                        write_stdout("\n");
+                        write_stdout(diag);
+                    }
+                } else if sc == 3 {
+                    xpass_count += 1;
+                    failed_count += 1;
+                    if !json_out {
+                        write_stdout("  [XPASS] ");
+                        write_stdout(fp_buf[..]);
+                        write_stdout("\n");
+                        write_stdout(diag);
+                    }
+                } else {
+                    failed_count += 1;
+                    if !json_out {
+                        write_stdout("  [FAIL] ");
+                        write_stdout(fp_buf[..]);
+                        write_stdout("\n");
+                        write_stdout(diag);
+                    }
+                }
+            }
+        }
+        if file_exists(list_path) { delete_file(list_path); }
+    } else {
+        var cur: i64 = 0;
+        let n = test_files.len;
+        while cur < n {
+            let start = cur;
+            while cur < n && test_files[cur] != '\n' { cur += 1; }
+            let t_file = test_files[start..cur];
             cur += 1;
+            guard t_file.len > 0 else { continue; }
+
+            var res = lit::TestResult { .. };
+            let _ = lit::run_single_lit_test_with_timeout(t_file, verbose, lit_cfg.timeout_sec, res);
+            total_time_us += res.duration_us;
+
+            if res.status == lit::TestStatus.Pass {
+                passed_count += 1;
+                if !json_out {
+                    write_stdout("  [PASS] ");
+                    write_stdout(t_file);
+                    write_stdout(" (");
+                    var ms_b: u8[..32] = [];
+                    format(ms_b, res.duration_us / 1000);
+                    write_stdout(ms_b[..]);
+                    write_stdout(" ms)\n");
+                }
+            } else if res.status == lit::TestStatus.XFail {
+                xfail_count += 1;
+                if !json_out {
+                    write_stdout("  [XFAIL] ");
+                    write_stdout(t_file);
+                    write_stdout(" (");
+                    var ms_b: u8[..32] = [];
+                    format(ms_b, res.duration_us / 1000);
+                    write_stdout(ms_b[..]);
+                    write_stdout(" ms)\n");
+                }
+            } else if res.status == lit::TestStatus.Unsupported {
+                unsupported_count += 1;
+                if !json_out {
+                    write_stdout("  [UNSUPPORTED] ");
+                    write_stdout(t_file);
+                    write_stdout("\n");
+                }
+            } else if res.status == lit::TestStatus.Timeout {
+                failed_count += 1;
+                if !json_out {
+                    write_stdout("  [TIMEOUT] ");
+                    write_stdout(t_file);
+                    write_stdout("\n");
+                    write_stdout(res.diag[..]);
+                }
+                if fail_fast { break; }
+            } else if res.status == lit::TestStatus.XPass {
+                xpass_count += 1;
+                failed_count += 1;
+                if !json_out {
+                    write_stdout("  [XPASS] ");
+                    write_stdout(t_file);
+                    write_stdout("\n");
+                    write_stdout(res.diag[..]);
+                }
+                if fail_fast { break; }
+            } else {
+                failed_count += 1;
+                if !json_out {
+                    write_stdout("  [FAIL] ");
+                    write_stdout(t_file);
+                    write_stdout("\n");
+                    write_stdout(res.diag[..]);
+                }
+                if fail_fast { break; }
+            }
         }
-        let t_file = test_files[start..cur];
-        cur += 1;
+    }
 
-        guard t_file.len > 0 else { continue; }
-
-        var res = lit::TestResult { .. };
-        let ok = lit::run_single_lit_test_with_timeout(t_file, verbose, lit_cfg.timeout_sec, res);
-        total_time_us += res.duration_us;
-
-        if res.status == lit::TestStatus.Pass {
-            passed_count += 1;
-            write_stdout("  [PASS] ");
-            write_stdout(t_file);
-            write_stdout(" (");
-            var ms_b: u8[..32] = [];
-            format(ms_b, res.duration_us / 1000);
-            write_stdout(ms_b[..]);
-            write_stdout(" ms)\n");
-        } else if res.status == lit::TestStatus.XFail {
-            xfail_count += 1;
-            write_stdout("  [XFAIL] ");
-            write_stdout(t_file);
-            write_stdout(" (");
-            var ms_b: u8[..32] = [];
-            format(ms_b, res.duration_us / 1000);
-            write_stdout(ms_b[..]);
-            write_stdout(" ms)\n");
-        } else if res.status == lit::TestStatus.Unsupported {
-            unsupported_count += 1;
-            write_stdout("  [UNSUPPORTED] ");
-            write_stdout(t_file);
-            write_stdout("\n");
-        } else if res.status == lit::TestStatus.Timeout {
-            failed_count += 1;
-            write_stdout("  [TIMEOUT] ");
-            write_stdout(t_file);
-            write_stdout("\n");
-            write_stdout(res.diag[..]);
-        } else if res.status == lit::TestStatus.XPass {
-            xpass_count += 1;
-            failed_count += 1;
-            write_stdout("  [XPASS] ");
-            write_stdout(t_file);
-            write_stdout("\n");
-            write_stdout(res.diag[..]);
-        } else {
-            failed_count += 1;
-            write_stdout("  [FAIL] ");
-            write_stdout(t_file);
-            write_stdout("\n");
-            write_stdout(res.diag[..]);
-        }
+    if json_out {
+        var jb: u8[>..] = [];
+        jb.append("{\"passed\": ");
+        format(jb, passed_count, ", \"failed\": ", failed_count, ", \"xfailed\": ", xfail_count);
+        format(jb, ", \"unsupported\": ", unsupported_count, ", \"duration_ms\": ", total_time_us / 1000, "}\n");
+        write_stdout(jb[..]);
+        return if failed_count == 0 && xpass_count == 0 { 0 } else { 1 };
     }
 
     write_stdout("-----------------------------------------------------------------------\n");
@@ -304,11 +565,11 @@ fn main() {
     if all_args.len <= 1 {
         let cfg_tests = lit_cfg.tests_dir_buf[..];
         if cfg_tests.len > 0 && (is_dir(cfg_tests) || file_exists(cfg_tests)) {
-            let rc = run_lit_suite(cfg_tests, false, false, false, lit_cfg);
+            let rc = run_lit_suite(cfg_tests, false, false, false, 0, "", false, false, lit_cfg);
             sys_exit(rc);
             return;
         } else if is_dir("tests") || file_exists("tests") {
-            let rc = run_lit_suite("tests", false, false, false, lit_cfg);
+            let rc = run_lit_suite("tests", false, false, false, 0, "", false, false, lit_cfg);
             sys_exit(rc);
             return;
         }
@@ -461,11 +722,45 @@ fn main() {
         return;
     }
 
+    if first == "check" {
+        let rc = lit::handle_check_cli(all_args[..], lit_cfg);
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "cov" {
+        let rc = lit::handle_cov_cli(all_args[..], lit_cfg);
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "verify" {
+        let rc = lit::handle_verify_cli(all_args[..], lit_cfg);
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "profile" {
+        let rc = lit::handle_profile_cli(all_args[..], lit_cfg);
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "fuzz" {
+        let rc = lit::handle_fuzz_cli(all_args[..], lit_cfg);
+        sys_exit(rc);
+        return;
+    }
+
     // Default mode: lit test runner over path or file
     var cli_target: const u8[:] = "";
     var verbose = false;
     var list_only = false;
     var allow_empty = false;
+    var fail_fast = false;
+    var json_out = false;
+    var jobs:        i64         = 0;
+    var filter_glob: const u8[:] = "";
 
     var idx: i64 = 1;
     while idx < all_args.len {
@@ -476,6 +771,32 @@ fn main() {
             list_only = true;
         } else if a == "--allow-empty" {
             allow_empty = true;
+        } else if a == "--fail-fast" || a == "-x" {
+            fail_fast = true;
+        } else if a == "--json" {
+            json_out = true;
+        } else if a == "-j" || a == "--jobs" {
+            guard idx + 1 < all_args.len else {
+                write_stdout("Error: --jobs requires a positive integer\n");
+                sys_exit(2);
+                return;
+            }
+            let j_val, ok = crap::parse_i64_slice(all_args[idx + 1]);
+            guard ok && j_val > 0 else {
+                write_stdout("Error: --jobs must be a positive integer\n");
+                sys_exit(2);
+                return;
+            }
+            jobs = j_val;
+            idx++;
+        } else if a == "--filter" {
+            guard idx + 1 < all_args.len else {
+                write_stdout("Error: --filter requires a glob pattern\n");
+                sys_exit(2);
+                return;
+            }
+            filter_glob = all_args[idx + 1];
+            idx++;
         } else if a == "--timeout" {
             guard idx + 1 < all_args.len else {
                 write_stdout("Error: --timeout requires a positive integer in seconds\n");
@@ -512,19 +833,19 @@ fn main() {
     }
 
     if cli_target.len > 0 {
-        let rc = run_lit_suite(cli_target, verbose, list_only, allow_empty, lit_cfg);
+        let rc = run_lit_suite(cli_target, verbose, list_only, allow_empty, jobs, filter_glob, fail_fast, json_out, lit_cfg);
         sys_exit(rc);
         return;
     }
 
     if lit_cfg.tests_dir_buf.len > 0 && (is_dir(lit_cfg.tests_dir_buf[..]) || file_exists(lit_cfg.tests_dir_buf[..])) {
-        let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose, list_only, allow_empty, lit_cfg);
+        let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose, list_only, allow_empty, jobs, filter_glob, fail_fast, json_out, lit_cfg);
         sys_exit(rc);
         return;
     }
 
     if is_dir("tests") || file_exists("tests") {
-        let rc = run_lit_suite("tests", verbose, list_only, allow_empty, lit_cfg);
+        let rc = run_lit_suite("tests", verbose, list_only, allow_empty, jobs, filter_glob, fail_fast, json_out, lit_cfg);
         sys_exit(rc);
         return;
     }

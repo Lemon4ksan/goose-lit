@@ -30,8 +30,29 @@ extern fn native_setenv(key: const u8[:], val: const u8[:]) -> i32 = "crap_seten
 extern fn native_host_os() -> i32 = "crap_host_os";
 extern fn native_host_arch() -> i32 = "crap_host_arch";
 extern fn native_cpu_count() -> i32 = "crap_cpu_count";
+extern fn native_next_seq() -> u64 = "crap_next_seq";
+extern fn native_work_reset() = "crap_work_reset";
+extern fn native_work_claim(total: i32) -> i32 = "crap_work_claim";
+extern fn native_atomic_set_stop(v: i32) = "crap_atomic_set_stop";
+extern fn native_atomic_get_stop() -> i32 = "crap_atomic_get_stop";
+extern fn native_file_mtime(path: const u8[:]) -> i64 = "crap_file_mtime";
+extern fn native_file_size(path: const u8[:]) -> i64 = "crap_file_size";
+extern fn native_exec_with_env_to_file(
+    cmd:        const u8[:],
+    env_key:    const u8[:],
+    env_val:    const u8[:],
+    out_path:   const u8[:],
+    timeout_ms: i32,
+) -> i32 = "crap_exec_with_env_to_file";
+extern fn native_exec_in_dir_with_env(
+    dir:        const u8[:],
+    cmd:        const u8[:],
+    env_key:    const u8[:],
+    env_val:    const u8[:],
+    out_path:   const u8[:],
+    timeout_ms: i32,
+) -> i32 = "crap_exec_in_dir_with_env";
 
-var g_cmd_seq:         u64  = 0;
 var g_cache_dir_ready: bool = false;
 
 // Cleans up any leftover .gcrap_cmd_*.tmp scratch files in .lit/cache/
@@ -75,7 +96,7 @@ fn exec_capture(cmd: const u8[:], out: u8[>..]&) -> i32 {
 
 // Runs an external command with an optional millisecond timeout and captures stdout/stderr into `out`.
 fn exec_capture_timeout(cmd: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32 {
-    g_cmd_seq += 1;
+    let seq = native_next_seq();
     ensure_lit_cache_dir();
 
     var tmp_path: u8[>..] = [];
@@ -86,7 +107,7 @@ fn exec_capture_timeout(cmd: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32
     }
     append_u64(tmp_path, clock_ns() as u64);
     tmp_path.push('_');
-    append_u64(tmp_path, g_cmd_seq);
+    append_u64(tmp_path, seq);
     tmp_path.append(".tmp");
 
     let rc = if timeout_ms > 0 {
@@ -94,6 +115,37 @@ fn exec_capture_timeout(cmd: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32
     } else {
         native_exec_to_file(cmd, tmp_path)
     };
+    if file_exists(tmp_path) {
+        read_file(tmp_path, out);
+        delete_file(tmp_path);
+    }
+    return rc;
+}
+
+// Runs a command inside `dir` with an isolated child env var and captures output into `out`.
+fn exec_in_dir_with_env_capture(
+    dir:        const u8[:],
+    cmd:        const u8[:],
+    env_key:    const u8[:],
+    env_val:    const u8[:],
+    timeout_ms: i32,
+    out:        u8[>..]&,
+) -> i32 {
+    let seq = native_next_seq();
+    ensure_lit_cache_dir();
+
+    var tmp_path: u8[>..] = [];
+    if is_dir(".lit/cache") {
+        tmp_path.append(".lit/cache/.gcrap_cmd_");
+    } else {
+        tmp_path.append(".gcrap_cmd_");
+    }
+    append_u64(tmp_path, clock_ns() as u64);
+    tmp_path.push('_');
+    append_u64(tmp_path, seq);
+    tmp_path.append(".tmp");
+
+    let rc = native_exec_in_dir_with_env(dir, cmd, env_key, env_val, tmp_path, timeout_ms);
     if file_exists(tmp_path) {
         read_file(tmp_path, out);
         delete_file(tmp_path);
@@ -110,7 +162,7 @@ fn exec_argv_capture(
     timeout_ms: i32,
     out:        u8[>..]&,
 ) -> i32 {
-    g_cmd_seq += 1;
+    let seq = native_next_seq();
     ensure_lit_cache_dir();
 
     var tmp_path: u8[>..] = [];
@@ -121,7 +173,7 @@ fn exec_argv_capture(
     }
     append_u64(tmp_path, clock_ns() as u64);
     tmp_path.push('_');
-    append_u64(tmp_path, g_cmd_seq);
+    append_u64(tmp_path, seq);
     tmp_path.append(".tmp");
 
     let rc = native_exec_argv_to_file(prog, arg1, arg2, arg3, tmp_path, timeout_ms);

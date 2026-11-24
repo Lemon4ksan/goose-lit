@@ -509,3 +509,32 @@ fn short_display_path(path: const u8[:], out: u8[>..]&) {
     }
     out.append(norm);
 }
+
+// Matches `text` against a wildcard `pattern` supporting `*` and `?`.
+fn glob_match(pattern: const u8[:], text: const u8[:]) -> bool {
+    var pi:   i64 = 0;
+    var ti:   i64 = 0;
+    var star: i64 = -1;
+    var m_ti: i64 = 0;
+
+    while ti < text.len {
+        if pi < pattern.len && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
+            pi++;
+            ti++;
+        } else if pi < pattern.len && pattern[pi] == '*' {
+            star = pi;
+            m_ti = ti;
+            pi++;
+        } else if star >= 0 {
+            pi = star + 1;
+            m_ti++;
+            ti = m_ti;
+        } else {
+            return false;
+        }
+    }
+    while pi < pattern.len && pattern[pi] == '*' {
+        pi++;
+    }
+    return pi == pattern.len;
+}

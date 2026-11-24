@@ -226,10 +226,72 @@ fn cleanup_scratch_variants(base: const u8[:]) {
     }
 }
 
+// Resolves a shim asset (`alloc_hook.h`, `prof_hook.h`, `fuzz_driver.c`)
+// relative to the running `goose-lit` executable directory or its parent.
+fn resolve_lit_shim_path(prog: const u8[:], shim_file: const u8[:], out: u8[>..]&) {
+    let os_id = crap::native_host_os();
+    let sep: u8 = if os_id == 1 { '\\' } else { '/' };
+
+    var last_sep: i64 = -1;
+    var k:        i64 = prog.len - 1;
+    while k >= 0 {
+        if prog[k] == '\\' || prog[k] == '/' {
+            last_sep = k;
+            break;
+        }
+        k--;
+    }
+
+    if last_sep > 0 {
+        // 1. Check <prog_dir>/shim/<shim_file>
+        var cand: u8[>..] = [];
+        cand.append(prog[..last_sep]);
+        cand.push(sep);
+        cand.append("shim");
+        cand.push(sep);
+        cand.append(shim_file);
+        if file_exists(cand[..]) {
+            out.append(cand[..]);
+            return;
+        }
+
+        // 2. Check <prog_dir>/../shim/<shim_file> (standard bin/goose-lit layout)
+        var parent_sep: i64 = -1;
+        var p:          i64 = last_sep - 1;
+        while p >= 0 {
+            if prog[p] == '\\' || prog[p] == '/' {
+                parent_sep = p;
+                break;
+            }
+            p--;
+        }
+        if parent_sep > 0 {
+            cand.clear();
+            cand.append(prog[..parent_sep]);
+            cand.push(sep);
+            cand.append("shim");
+            cand.push(sep);
+            cand.append(shim_file);
+            if file_exists(cand[..]) {
+                out.append(cand[..]);
+                return;
+            }
+        }
+    }
+
+    // 3. Fallback to workspace-local shim/<shim_file>
+    out.append("shim");
+    out.push(sep);
+    out.append(shim_file);
+}
+
 // Expands lit substitutions in a command line:
 // %s -> file_path
 // %S -> directory containing file_path
 // %t -> temporary scratch file path
+// %alloc_hook -> path to goose-lit/shim/alloc_hook.h
+// %prof_hook  -> path to goose-lit/shim/prof_hook.h
+// %fuzz_driver -> path to goose-lit/shim/fuzz_driver.c
 fn substitute_lit_command(
     raw_cmd:   const u8[:],
     file_path: const u8[:],
@@ -337,6 +399,22 @@ fn substitute_lit_command(
                     continue;
                 } else if tok == "%t" {
                     out_cmd.append(scratch_path[..]);
+                    i = j;
+                    continue;
+                } else if tok == "%alloc_hook" {
+                    resolve_lit_shim_path(prog[..], "alloc_hook.h", out_cmd);
+                    i = j;
+                    continue;
+                } else if tok == "%prof_hook" {
+                    resolve_lit_shim_path(prog[..], "prof_hook.h", out_cmd);
+                    i = j;
+                    continue;
+                } else if tok == "%fuzz_driver" {
+                    resolve_lit_shim_path(prog[..], "fuzz_driver.c", out_cmd);
+                    i = j;
+                    continue;
+                } else if tok == "%cov_rt" {
+                    resolve_lit_shim_path(prog[..], "cov_rt.h", out_cmd);
                     i = j;
                     continue;
                 }
