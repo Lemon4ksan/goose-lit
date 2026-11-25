@@ -162,6 +162,301 @@ fn test_correlate_bench_and_stages() {
     assert(rows[5].cyc_per_sloc_x100 == 70);
 }
 
+fn test_baseline_roundtrip_and_cycle_preserve() {
+    var pool:   u8[>..]                 = [];
+    var files:  lit::FileSlocStats[>..] = [];
+    var dirs:   lit::DirSlocStats[>..]  = [];
+    var scopes: lit::CycleSlocRow[>..]  = [];
+
+    let po, pl = crap::pool_add(pool, "http/parser.goose");
+    files.push(lit::FileSlocStats {
+        path_off:      po,
+        path_len:      pl,
+        sloc:          100,
+        stmts:         90,
+        tokens:        600,
+        comment_lines: 10,
+        packing_x100:  90,
+        bce_kept:      2,
+        smells_total:  1,
+        ..
+    });
+    let doff, dlen = crap::pool_add(pool, "http");
+    dirs.push(lit::DirSlocStats {
+        dir_off:       doff,
+        dir_len:       dlen,
+        files:         1,
+        sloc:          100,
+        stmts:         90,
+        tokens:        600,
+        comment_lines: 10,
+        smells_total:  1,
+    });
+    let so, sl = crap::pool_add(pool, "L0_GET");
+    scopes.push(lit::CycleSlocRow {
+        name_off:          so,
+        name_len:          sl,
+        kind:              lit::SLOC_SCOPE_BENCH,
+        files:             1,
+        sloc:              100,
+        stmts:             90,
+        cycles_x10:        9500,
+        cyc_per_sloc_x100: 950,
+        cl_x10:            950000,
+        radar:             lit::SLOC_RADAR_HOT_KERNEL,
+        ..
+    });
+
+    var empty_prev = lit::SlocBaseline { .. };
+    var empty_prev_scopes: lit::SlocBaselineScope[>..] = [];
+    var saved:             u8[>..]                     = [];
+    lit::serialize_sloc_baseline(
+        pool[..],
+        files[..],
+        dirs[..],
+        scopes[..],
+        true,
+        empty_prev,
+        "",
+        empty_prev_scopes[..],
+        false,
+        saved,
+    );
+
+    var bpool: u8[>..] = [];
+    var base = lit::SlocBaseline { .. };
+    var bfiles:  lit::SlocBaselineFile[>..]  = [];
+    var bscopes: lit::SlocBaselineScope[>..] = [];
+    assert(lit::parse_sloc_baseline(saved[..], bpool, base, bfiles, bscopes));
+    assert(base.loaded && base.bce_measured);
+    assert(base.total_sloc == 100 && base.total_bce_kept == 2 && base.total_smells == 1);
+    assert(bfiles.len == 1 && bfiles[0].bce_kept == 2);
+    assert(bscopes.len == 1 && bscopes[0].cycles_x10 == 9500);
+
+    // Static re-save with preserve_cycles=true keeps prior SCOPE cycles
+    var empty_scopes: lit::CycleSlocRow[>..] = [];
+    var saved_pres:   u8[>..]                = [];
+    lit::serialize_sloc_baseline(
+        pool[..],
+        files[..],
+        dirs[..],
+        empty_scopes[..],
+        false,
+        base,
+        bpool[..],
+        bscopes[..],
+        true,
+        saved_pres,
+    );
+    var bpool2: u8[>..] = [];
+    var base2 = lit::SlocBaseline { .. };
+    var bfiles2:  lit::SlocBaselineFile[>..]  = [];
+    var bscopes2: lit::SlocBaselineScope[>..] = [];
+    assert(lit::parse_sloc_baseline(saved_pres[..], bpool2, base2, bfiles2, bscopes2));
+    assert(!base2.bce_measured);
+    assert(bscopes2.len == 1 && bscopes2[0].cycles_x10 == 9500);
+
+    // Static re-save with preserve_cycles=false (--reset-cycles) clears SCOPE cycles
+    var saved_reset: u8[>..] = [];
+    lit::serialize_sloc_baseline(
+        pool[..],
+        files[..],
+        dirs[..],
+        empty_scopes[..],
+        false,
+        base,
+        bpool[..],
+        bscopes[..],
+        false,
+        saved_reset,
+    );
+    var bpool3: u8[>..] = [];
+    var base3 = lit::SlocBaseline { .. };
+    var bfiles3:  lit::SlocBaselineFile[>..]  = [];
+    var bscopes3: lit::SlocBaselineScope[>..] = [];
+    assert(lit::parse_sloc_baseline(saved_reset[..], bpool3, base3, bfiles3, bscopes3));
+    assert(bscopes3.len == 0);
+}
+
+fn test_packing_small_file_and_delta_gaming() {
+    var cfg = lit::SlocCliArgs { check_packing: true, max_packing: 1.35, .. };
+    var pool: u8[>..] = [];
+    var empty_base = lit::SlocBaseline { .. };
+    var empty_bfiles:  lit::SlocBaselineFile[>..]  = [];
+    var empty_bscopes: lit::SlocBaselineScope[>..] = [];
+    var empty_scopes:  lit::CycleSlocRow[>..]      = [];
+
+    // 1. Small file (sloc < 10) with high packing is exempt from absolute ceiling
+    var f_small: lit::FileSlocStats[>..] = [];
+    let p1o, p1l = crap::pool_add(pool, "stub.goose");
+    f_small.push(lit::FileSlocStats { path_off: p1o, path_len: p1l, sloc: 5, stmts: 9, packing_x100: 180, .. });
+    var res1 = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], f_small, empty_scopes, empty_base, "", empty_bfiles[..], empty_bscopes[..], false, 0, res1);
+    assert(res1.verdict == lit::SLOC_VERDICT_UNCHANGED && res1.exit_code == 0);
+
+    // 2. Normal file (sloc >= 10) with packing 1.50 > 1.35 triggers GAMING_DETECTED
+    var f_big: lit::FileSlocStats[>..] = [];
+    let p2o, p2l = crap::pool_add(pool, "packed.goose");
+    f_big.push(lit::FileSlocStats { path_off: p2o, path_len: p2l, sloc: 15, stmts: 23, packing_x100: 153, .. });
+    var res2 = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], f_big, empty_scopes, empty_base, "", empty_bfiles[..], empty_bscopes[..], false, 0, res2);
+    assert(res2.verdict == lit::SLOC_VERDICT_GAMING_DETECTED && res2.exit_code == 1);
+
+    // 3. Delta-packing gaming: sloc dropped 50->40, stmts stayed 50, packing jumped 1.00->1.25 (+0.25 > +0.15)
+    var bpool: u8[>..] = [];
+    let bpo, bpl = crap::pool_add(bpool, "gamed.goose");
+    var base = lit::SlocBaseline { loaded: true, total_files: 1, total_sloc: 50, total_stmts: 50, .. };
+    var bfiles: lit::SlocBaselineFile[>..] = [];
+    bfiles.push(lit::SlocBaselineFile { path_off: bpo, path_len: bpl, sloc: 50, stmts: 50, packing_x100: 100, .. });
+
+    var f_gamed: lit::FileSlocStats[>..] = [];
+    let p3o, p3l = crap::pool_add(pool, "gamed.goose");
+    f_gamed.push(lit::FileSlocStats { path_off: p3o, path_len: p3l, sloc: 40, stmts: 50, packing_x100: 125, .. });
+    var res3 = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], f_gamed, empty_scopes, base, bpool[..], bfiles[..], empty_bscopes[..], false, 0, res3);
+    assert(res3.verdict == lit::SLOC_VERDICT_GAMING_DETECTED && res3.exit_code == 1);
+}
+
+fn test_unmeasured_bce_and_zero_cycle_scope() {
+    var pool: u8[>..] = [];
+    let po, pl = crap::pool_add(pool, "a.goose");
+    let so, sl = crap::pool_add(pool, "S1");
+
+    var bpool: u8[>..] = [];
+    let bpo, bpl = crap::pool_add(bpool, "a.goose");
+    let bso, bsl = crap::pool_add(bpool, "S1");
+
+    var base = lit::SlocBaseline { loaded: true, bce_measured: false, total_files: 1, total_sloc: 100, total_bce_kept: -1, .. };
+    var bfiles: lit::SlocBaselineFile[>..] = [];
+    bfiles.push(lit::SlocBaselineFile { path_off: bpo, path_len: bpl, sloc: 100, stmts: 80, packing_x100: 80, bce_kept: -1, .. });
+    var bscopes: lit::SlocBaselineScope[>..] = [];
+    bscopes.push(lit::SlocBaselineScope { name_off: bso, name_len: bsl, kind: lit::SLOC_SCOPE_BENCH, sloc: 100, cycles_x10: 0, .. });
+
+    var files: lit::FileSlocStats[>..] = [];
+    files.push(lit::FileSlocStats { path_off: po, path_len: pl, sloc: 100, stmts: 80, packing_x100: 80, bce_kept: 3, .. });
+    var scopes: lit::CycleSlocRow[>..] = [];
+    scopes.push(lit::CycleSlocRow { name_off: so, name_len: sl, kind: lit::SLOC_SCOPE_BENCH, sloc: 100, cycles_x10: 5000, .. });
+
+    var cfg = lit::SlocCliArgs { bce_enabled: true, .. };
+    var res = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], files, scopes, base, bpool[..], bfiles[..], bscopes[..], false, 0, res);
+    assert(res.exit_code == 0);
+    assert(res.audit.bce_skipped_unmeasured);
+
+    // Now mark baseline bce_measured=true with bce_kept=1 -> current bce_kept=3 must fail GAMING_DETECTED
+    base.bce_measured = true;
+    base.total_bce_kept = 1;
+    bfiles[0].bce_kept = 1;
+    var res2 = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], files, scopes, base, bpool[..], bfiles[..], bscopes[..], false, 0, res2);
+    assert(res2.verdict == lit::SLOC_VERDICT_GAMING_DETECTED && res2.exit_code == 1);
+}
+
+fn test_dedup_and_hot_growth_credit() {
+    var pool: u8[>..] = [];
+    let p1o, p1l = crap::pool_add(pool, "core/a.goose");
+    let p2o, p2l = crap::pool_add(pool, "tls/b.goose");
+    let so, sl = crap::pool_add(pool, "Core_Hot");
+
+    var bpool: u8[>..] = [];
+    let bp1o, bp1l = crap::pool_add(bpool, "core/a.goose");
+    let bp2o, bp2l = crap::pool_add(bpool, "tls/b.goose");
+    let bso, bsl = crap::pool_add(bpool, "Core_Hot");
+
+    var base = lit::SlocBaseline { loaded: true, total_files: 2, total_sloc: 300, total_stmts: 240, .. };
+    var bfiles: lit::SlocBaselineFile[>..] = [];
+    bfiles.push(lit::SlocBaselineFile { path_off: bp1o, path_len: bp1l, sloc: 100, stmts: 80, packing_x100: 80, .. });
+    bfiles.push(lit::SlocBaselineFile { path_off: bp2o, path_len: bp2l, sloc: 200, stmts: 160, packing_x100: 80, .. });
+    var bscopes: lit::SlocBaselineScope[>..] = [];
+    bscopes.push(lit::SlocBaselineScope { name_off: bso, name_len: bsl, kind: lit::SLOC_SCOPE_BENCH, sloc: 100, cycles_x10: 10000, .. });
+
+    // 1. Static cross-module dedup: core/a grows +20, tls/b drops -100 => total 220 <= 300 => PARETO_WIN
+    var files1: lit::FileSlocStats[>..] = [];
+    files1.push(lit::FileSlocStats { path_off: p1o, path_len: p1l, sloc: 120, stmts: 96, packing_x100: 80, .. });
+    files1.push(lit::FileSlocStats { path_off: p2o, path_len: p2l, sloc: 100, stmts: 80, packing_x100: 80, .. });
+    var scopes1: lit::CycleSlocRow[>..] = [];
+    scopes1.push(lit::CycleSlocRow { name_off: so, name_len: sl, kind: lit::SLOC_SCOPE_BENCH, sloc: 120, cycles_x10: 0, .. });
+    var cfg1 = lit::SlocCliArgs { sloc_delta: 0, .. };
+    var res1 = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg1, pool[..], files1, scopes1, base, bpool[..], bfiles[..], bscopes[..], false, 0, res1);
+    assert(res1.verdict == lit::SLOC_VERDICT_PARETO_WIN && res1.exit_code == 0);
+
+    // 2. --allow-hot-growth: Core_Hot grows +6 (100->106) while cycles drop 1000->700 (norm_cl = 0.742 <= 0.90)
+    var files2: lit::FileSlocStats[>..] = [];
+    files2.push(lit::FileSlocStats { path_off: p1o, path_len: p1l, sloc: 106, stmts: 85, packing_x100: 80, .. });
+    files2.push(lit::FileSlocStats { path_off: p2o, path_len: p2l, sloc: 200, stmts: 160, packing_x100: 80, .. });
+    var scopes2: lit::CycleSlocRow[>..] = [];
+    scopes2.push(lit::CycleSlocRow { name_off: so, name_len: sl, kind: lit::SLOC_SCOPE_BENCH, sloc: 106, cycles_x10: 7000, .. });
+    var cfg2 = lit::SlocCliArgs { allow_hot_growth: true, cycle_noise: 5.0, .. };
+    var res2 = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg2, pool[..], files2, scopes2, base, bpool[..], bfiles[..], bscopes[..], false, 0, res2);
+    assert(res2.exit_code == 0);
+    assert(res2.audit.hot_growth_credit_sum == 6);
+
+    // 3. Unrelated file adds +5 on top of credited +6 => total 311 > 300 + 6 => REGRESSION
+    files2[1].sloc = 205;
+    var res3 = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg2, pool[..], files2, scopes2, base, bpool[..], bfiles[..], bscopes[..], false, 0, res3);
+    assert(res3.verdict == lit::SLOC_VERDICT_REGRESSION && res3.exit_code == 1);
+}
+
+fn test_pareto_verdicts_and_reports() {
+    var pool: u8[>..] = [];
+    let po, pl = crap::pool_add(pool, "http/a.goose");
+    let doff, dlen = crap::pool_add(pool, "http");
+    let so, sl = crap::pool_add(pool, "L0");
+
+    var bpool: u8[>..] = [];
+    let bpo, bpl = crap::pool_add(bpool, "http/a.goose");
+    let bso, bsl = crap::pool_add(bpool, "L0");
+
+    var base = lit::SlocBaseline { loaded: true, total_files: 1, total_sloc: 100, total_stmts: 80, total_smells: 1, .. };
+    var bfiles: lit::SlocBaselineFile[>..] = [];
+    bfiles.push(lit::SlocBaselineFile { path_off: bpo, path_len: bpl, sloc: 100, stmts: 80, packing_x100: 80, smells_total: 1, .. });
+    var bscopes: lit::SlocBaselineScope[>..] = [];
+    bscopes.push(lit::SlocBaselineScope { name_off: bso, name_len: bsl, kind: lit::SLOC_SCOPE_BENCH, sloc: 100, cycles_x10: 10000, .. });
+
+    // SLOC_WIN_PERF_REGRESS: L 100->80, C 1000->1200 (+20% > 5% noise)
+    var files: lit::FileSlocStats[>..] = [];
+    files.push(lit::FileSlocStats { path_off: po, path_len: pl, sloc: 80, stmts: 64, packing_x100: 80, smells_total: 1, .. });
+    var dirs: lit::DirSlocStats[>..] = [];
+    dirs.push(lit::DirSlocStats { dir_off: doff, dir_len: dlen, files: 1, sloc: 80, stmts: 64, smells_total: 1, .. });
+    var scopes: lit::CycleSlocRow[>..] = [];
+    scopes.push(lit::CycleSlocRow { name_off: so, name_len: sl, kind: lit::SLOC_SCOPE_BENCH, files: 1, sloc: 80, stmts: 64, cycles_x10: 12000, cyc_per_sloc_x100: 1500, cl_x10: 960000, radar: lit::SLOC_RADAR_HOT_KERNEL, .. });
+
+    var cfg = lit::SlocCliArgs { cycle_noise: 5.0, check_smells: true, .. };
+    var res = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], files, scopes, base, bpool[..], bfiles[..], bscopes[..], false, 0, res);
+    assert(res.verdict == lit::SLOC_VERDICT_SLOC_WIN_PERF_REGRESS && res.exit_code == 1);
+
+    // PARETO_WIN: L 100->80, C 1000->800
+    scopes[0].cycles_x10 = 8000;
+    var res_win = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], files, scopes, base, bpool[..], bfiles[..], bscopes[..], false, 0, res_win);
+    assert(res_win.verdict == lit::SLOC_VERDICT_PARETO_WIN && res_win.exit_code == 0);
+
+    // Local smell ratchet failure: smells 1 -> 2
+    files[0].smells_total = 2;
+    var res_sm = lit::SlocGateResult { .. };
+    lit::evaluate_sloc_gate(cfg, pool[..], files, scopes, base, bpool[..], bfiles[..], bscopes[..], false, 0, res_sm);
+    assert(res_sm.verdict == lit::SLOC_VERDICT_REGRESSION && res_sm.exit_code == 1);
+
+    // Report formatters produce valid structured output
+    var dead:    lit::DeadFnCandidate[>..] = [];
+    var out_tbl: u8[>..]                   = [];
+    var out_md:  u8[>..]                   = [];
+    var out_js:  u8[>..]                   = [];
+    var out_tsv: u8[>..]                   = [];
+    lit::format_sloc_report_table(cfg, pool[..], files[..], dirs[..], dead[..], scopes[..], res_win, out_tbl);
+    lit::format_sloc_report_md(cfg, pool[..], files[..], dirs[..], dead[..], scopes[..], res_win, out_md);
+    lit::format_sloc_report_json(cfg, pool[..], files[..], dirs[..], dead[..], scopes[..], res_win, out_js);
+    lit::format_sloc_report_tsv(cfg, pool[..], files[..], dirs[..], dead[..], scopes[..], res_win, out_tsv);
+    assert(crap::slice_contains(out_tbl[..], "PARETO_WIN"));
+    assert(crap::slice_contains(out_md[..], "| Scope |"));
+    assert(crap::slice_contains(out_js[..], "\"verdict\": \"PARETO_WIN\""));
+    assert(crap::slice_contains(out_tsv[..], "SCOPE\tL0\t"));
+}
+
 fn main() {
     test_sloc_and_guard_stmts();
     test_multiline_string_and_nested_comments();
@@ -169,6 +464,11 @@ fn main() {
     test_dead_fn_ignores_test_callers();
     test_sloc_map_and_crlf();
     test_correlate_bench_and_stages();
+    test_baseline_roundtrip_and_cycle_preserve();
+    test_packing_small_file_and_delta_gaming();
+    test_unmeasured_bce_and_zero_cycle_scope();
+    test_dedup_and_hot_growth_credit();
+    test_pareto_verdicts_and_reports();
     print("SLOC_TEST: PASS");
 }
 

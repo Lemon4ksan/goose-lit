@@ -50,3 +50,5 @@ import fuzz.cli;
 import sloc.model;
 import sloc.scanner;
 import sloc.correlate;
+import sloc.baseline;
+import sloc.report;
