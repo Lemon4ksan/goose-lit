@@ -102,6 +102,7 @@ struct ProfileSample {
 }
 
 struct CycleSlocRow {
+    map_idx:             i32 = -1,
     name_off:            i32 = 0,
     name_len:            i32 = 0,
     kind:                u8  = 0,
@@ -180,19 +181,17 @@ struct SlocGateResult {
 }
 
 struct SlocCliArgs {
-    targets_blob:        u8[..2048] = [],
     map_path:            u8[..256]  = [],
-    profile_tsvs_blob:   u8[..2048] = [],
-    run_benches_blob:    u8[..2048] = [],
+    explicit_map:        bool       = false,
     run_profile_all:     bool       = false,
     cc:                  u8[..256]  = [],
     benchtime:           u8[..32]   = [],
     filter:              u8[..128]  = [],
     bce_enabled:         bool       = false,
-    bce_entries_blob:    u8[..512]  = [],
     exclude_blob:        u8[..1024] = [],
     has_custom_exclude:  bool       = false,
     baseline_path:       u8[..256]  = [],
+    explicit_baseline:   bool       = false,
     no_baseline:         bool       = false,
     save_baseline:       bool       = false,
     save_baseline_path:  u8[..256]  = [],

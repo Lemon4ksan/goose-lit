@@ -339,11 +339,12 @@ fn scan_tokens_stmts_and_smells(src: const u8[:], tokens: const crap::Token[:], 
             pending_loop = true;
         } else if tk == crap::TOK_IDENT {
             let word = sloc_token_text(src, tokens[i]);
-            if word == "var" && i + 3 < tokens.len &&
+            if word == "var" && i + 4 < tokens.len &&
                tokens[i + 1].kind == crap::TOK_IDENT &&
                tokens[i + 2].kind == crap::TOK_COLON &&
                tokens[i + 3].kind == crap::TOK_IDENT &&
-               sloc_token_text(src, tokens[i + 3]) == "u64" {
+               sloc_token_text(src, tokens[i + 3]) == "u64" &&
+               (tokens[i + 4].kind == crap::TOK_ASSIGN || tokens[i + 4].kind == crap::TOK_SEMI) {
                 st.smell_u64_loop += 1;
             }
             if loop_depth > 0 && i + 1 < tokens.len && tokens[i + 1].kind == crap::TOK_LPAREN {

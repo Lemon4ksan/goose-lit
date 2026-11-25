@@ -160,11 +160,16 @@ fn parse_profile_tsv_samples(raw: const u8[:], samples: ProfileSample[>..]&) -> 
 fn path_matches_scope_prefix(fpath: const u8[:], pref: const u8[:]) -> bool {
     guard pref.len > 0 && fpath.len > 0 else { return false; }
     if pref == "." || pref == "./" { return true; }
-    if fpath == pref { return true; }
-    if crap::slice_ends_with(pref, "/") {
-        return crap::slice_starts_with(fpath, pref);
+    var f = fpath;
+    while f.len > 1 && f[f.len - 1] == '/' {
+        f = f[..f.len - 1];
     }
-    return fpath.len > pref.len && crap::slice_starts_with(fpath, pref) && fpath[pref.len] == '/';
+    var p = pref;
+    while p.len > 1 && p[p.len - 1] == '/' {
+        p = p[..p.len - 1];
+    }
+    if f == p { return true; }
+    return f.len > p.len && crap::slice_starts_with(f, p) && f[p.len] == '/';
 }
 
 fn path_matches_prefix_csv(fpath: const u8[:], csv: const u8[:]) -> bool {
@@ -265,13 +270,15 @@ fn correlate_scopes(
     is_partial_scan: bool,
     rows:            CycleSlocRow[>..]&,
 ) {
-    for &m in maps {
+    for mi in maps.len {
+        let m = maps[mi];
         let prefs = crap::pool_slice(pool, m.prefixes_off, m.prefixes_len);
         if is_partial_scan && !scope_covered_by_scan(prefs, scan_prefixes) {
             continue;
         }
 
         var row = CycleSlocRow {
+            map_idx:  mi as i32,
             name_off: m.name_off,
             name_len: m.name_len,
             kind:     m.kind,
@@ -383,26 +390,37 @@ fn run_profile_benchmarks(
         tmp_tsv.append(".tsv");
 
         cmd.clear();
-        append_quoted(cmd, prog);
-        cmd.append(" profile ");
-        append_quoted(cmd, bench);
+        cmd.append(prog);
+        cmd.push(0);
+        cmd.append("profile");
+        cmd.push(0);
+        cmd.append(bench);
+        cmd.push(0);
         if eff_cc.len > 0 {
-            cmd.append(" --cc ");
-            append_quoted(cmd, eff_cc);
+            cmd.append("--cc");
+            cmd.push(0);
+            cmd.append(eff_cc);
+            cmd.push(0);
         }
         if benchtime.len > 0 {
-            cmd.append(" --benchtime ");
-            append_quoted(cmd, benchtime);
+            cmd.append("--benchtime");
+            cmd.push(0);
+            cmd.append(benchtime);
+            cmd.push(0);
         }
         if filter.len > 0 {
-            cmd.append(" --filter ");
-            append_quoted(cmd, filter);
+            cmd.append("--filter");
+            cmd.push(0);
+            cmd.append(filter);
+            cmd.push(0);
         }
-        cmd.append(" --save ");
-        append_quoted(cmd, tmp_tsv[..]);
+        cmd.append("--save");
+        cmd.push(0);
+        cmd.append(tmp_tsv[..]);
+        cmd.push(0);
 
         cap_out.clear();
-        let rc = crap::exec_capture(cmd[..], cap_out);
+        let rc = crap::exec_argv_nul_capture(cmd[..], 0, cap_out);
         if rc != 0 {
             write_stdout("Error: profile run failed for ");
             write_stdout(bench);

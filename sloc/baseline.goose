@@ -9,6 +9,7 @@ import os;
 import sys.bytes;
 import crap.ast.model;
 import sloc.model;
+import sloc.correlate;
 
 fn next_ws_token(line: const u8[:], pos: i64&) -> const u8[:] {
     let n = line.len;
@@ -319,6 +320,7 @@ fn append_reason(dst: u8[..512]&, msg: const u8[:]) {
 fn evaluate_sloc_gate(
     cfg:             const SlocCliArgs&,
     pool:            const u8[:],
+    maps:            const ScopeMapping[:],
     files:           FileSlocStats[>..]&,
     scopes:          CycleSlocRow[>..]&,
     base:            const SlocBaseline&,
@@ -431,7 +433,14 @@ fn evaluate_sloc_gate(
             }
         }
 
-        // Scope Pareto evaluation
+        // Scope Pareto evaluation (deduplicating hot-growth credits across overlapping scopes)
+        var hot_file_mask: u8[>..] = [];
+        for _ in files.len {
+            hot_file_mask.push(0);
+        }
+        var any_hot_mapped = false;
+        var unmapped_hot_credit: i64 = 0;
+
         for &sc in scopes {
             let sname = crap::pool_slice(pool, sc.name_off, sc.name_len);
             let bi = find_prev_scope(sname, sc.kind, base_pool, base_scopes);
@@ -462,7 +471,19 @@ fn evaluate_sloc_gate(
                 if cfg.allow_hot_growth && sc.norm_cl_x1000 <= 900 {
                     sc.verdict = SLOC_VERDICT_PARETO_WIN;
                     sc.hot_growth_credited = sc.sloc - bs.sloc;
-                    res.audit.hot_growth_credit_sum += sc.hot_growth_credited;
+                    let mi: i64 = sc.map_idx;
+                    if mi >= 0 && mi < maps.len {
+                        any_hot_mapped = true;
+                        let prefs = crap::pool_slice(pool, maps[mi].prefixes_off, maps[mi].prefixes_len);
+                        for fi in files.len {
+                            let fpath = crap::pool_slice(pool, files[fi].path_off, files[fi].path_len);
+                            if path_matches_prefix_csv(fpath, prefs) {
+                                hot_file_mask[fi] = 1;
+                            }
+                        }
+                    } else {
+                        unmapped_hot_credit += sc.hot_growth_credited;
+                    }
                 } else {
                     sc.verdict = SLOC_VERDICT_PERF_WIN_BLOAT_WARN;
                     append_reason(res.reason, "perf win grew SLOC");
@@ -474,6 +495,21 @@ fn evaluate_sloc_gate(
             }
             promote_verdict(best_verdict, sc.verdict);
         }
+
+        if any_hot_mapped {
+            var unique_hot_delta: i64 = 0;
+            for fi in files.len {
+                guard hot_file_mask[fi] == 1 else { continue; }
+                let fpath = crap::pool_slice(pool, files[fi].path_off, files[fi].path_len);
+                let bfi = find_baseline_file(fpath, base_pool, base_files);
+                let prev_sloc = if bfi >= 0 { base_files[bfi].sloc } else { 0 };
+                unique_hot_delta += (files[fi].sloc - prev_sloc);
+            }
+            if unique_hot_delta > 0 {
+                res.audit.hot_growth_credit_sum += unique_hot_delta;
+            }
+        }
+        res.audit.hot_growth_credit_sum += unmapped_hot_credit;
 
         let eff_delta = cfg.sloc_delta + res.audit.hot_growth_credit_sum;
         if res.audit.delta_sloc > eff_delta {

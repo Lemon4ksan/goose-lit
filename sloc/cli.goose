@@ -50,24 +50,44 @@ fn print_sloc_usage() {
     write_stdout("  --help, -h              Print this help text\n");
 }
 
-fn append_nl_bounded<B>(dst: B&, item: const u8[:]) -> bool {
-    guard item.len > 0 && dst.len + item.len + 1 <= dst.cap else { return false; }
+fn append_nl_grow(dst: u8[>..]&, item: const u8[:]) {
+    guard item.len > 0 else { return; }
     dst.append(item);
     dst.push('\n');
-    return true;
 }
 
 fn is_valid_sloc_format(fmt: const u8[:]) -> bool {
     return fmt == "table" || fmt == "md" || fmt == "markdown" || fmt == "json" || fmt == "tsv";
 }
 
+fn is_bench_file_arg(arg_s: const u8[:]) -> bool {
+    guard arg_s.len > 0 && !crap::slice_starts_with(arg_s, "-") else { return false; }
+    return crap::slice_ends_with(arg_s, ".goose") || (file_exists(arg_s) && !is_dir(arg_s));
+}
+
+fn is_baseline_file_arg(arg_s: const u8[:]) -> bool {
+    guard arg_s.len > 0 && !crap::slice_starts_with(arg_s, "-") else { return false; }
+    if arg_s == "." || arg_s == "./" || arg_s == ".\\" { return false; }
+    if crap::slice_ends_with(arg_s, "/") || crap::slice_ends_with(arg_s, "\\") { return false; }
+    if is_dir(arg_s) { return false; }
+    return true;
+}
+
 fn parse_sloc_cli_args(
-    all_args:  const (u8[:])[:],
-    lit_cfg:   const crap::LitConfig&,
-    cfg:       SlocCliArgs&,
-    show_help: bool&,
+    all_args:          const (u8[:])[:],
+    lit_cfg:           const crap::LitConfig&,
+    cfg:               SlocCliArgs&,
+    targets_blob:      u8[>..]&,
+    profile_tsvs_blob: u8[>..]&,
+    run_benches_blob:  u8[>..]&,
+    bce_entries_blob:  u8[>..]&,
+    show_help:         bool&,
 ) -> bool {
     cfg = SlocCliArgs { .. };
+    targets_blob.clear();
+    profile_tsvs_blob.clear();
+    run_benches_blob.clear();
+    bce_entries_blob.clear();
     show_help = false;
     let _ = crap::set_bounded(cfg.format, "table");
 
@@ -79,7 +99,7 @@ fn parse_sloc_cli_args(
         cfg.has_custom_exclude = true;
     }
     if lit_cfg.sloc_bce_entries_buf.len > 0 {
-        let _ = crap::set_bounded(cfg.bce_entries_blob, lit_cfg.sloc_bce_entries_buf[..]);
+        bce_entries_blob.append(lit_cfg.sloc_bce_entries_buf[..]);
     }
     if lit_cfg.cc_buf.len > 0 {
         let _ = crap::set_bounded(cfg.cc, lit_cfg.cc_buf[..]);
@@ -110,17 +130,18 @@ fn parse_sloc_cli_args(
             }
             idx += 1;
             let _ = crap::set_bounded(cfg.map_path, all_args[idx]);
+            cfg.explicit_map = true;
         } else if a == "--profile" {
             guard idx + 1 < all_args.len else {
                 write_stdout("Error: --profile requires a TSV path\n");
                 return false;
             }
             idx += 1;
-            let _ = append_nl_bounded(cfg.profile_tsvs_blob, all_args[idx]);
+            append_nl_grow(profile_tsvs_blob, all_args[idx]);
         } else if a == "--run-profile" {
-            if idx + 1 < all_args.len && !crap::slice_starts_with(all_args[idx + 1], "-") {
+            if idx + 1 < all_args.len && is_bench_file_arg(all_args[idx + 1]) {
                 idx += 1;
-                let _ = append_nl_bounded(cfg.run_benches_blob, all_args[idx]);
+                append_nl_grow(run_benches_blob, all_args[idx]);
             } else {
                 cfg.run_profile_all = true;
             }
@@ -154,11 +175,11 @@ fn parse_sloc_cli_args(
             }
             idx += 1;
             if !cli_bce_entry_given {
-                cfg.bce_entries_blob.clear();
+                bce_entries_blob.clear();
                 cli_bce_entry_given = true;
             }
             cfg.bce_enabled = true;
-            let _ = append_nl_bounded(cfg.bce_entries_blob, all_args[idx]);
+            append_nl_grow(bce_entries_blob, all_args[idx]);
         } else if a == "--exclude" {
             guard idx + 1 < all_args.len else {
                 write_stdout("Error: --exclude requires a path prefix\n");
@@ -175,12 +196,14 @@ fn parse_sloc_cli_args(
             }
             idx += 1;
             let _ = crap::set_bounded(cfg.baseline_path, all_args[idx]);
+            cfg.explicit_baseline = true;
             cfg.no_baseline = false;
         } else if a == "--no-baseline" {
             cfg.no_baseline = true;
+            cfg.explicit_baseline = false;
         } else if a == "--save-baseline" {
             cfg.save_baseline = true;
-            if idx + 1 < all_args.len && !crap::slice_starts_with(all_args[idx + 1], "-") {
+            if idx + 1 < all_args.len && is_baseline_file_arg(all_args[idx + 1]) {
                 idx += 1;
                 let _ = crap::set_bounded(cfg.save_baseline_path, all_args[idx]);
             }
@@ -283,14 +306,17 @@ fn parse_sloc_cli_args(
             return false;
         } else {
             var norm_t: u8[>..] = [];
-            crap::normalize_slashes(a, norm_t);
-            let _ = append_nl_bounded(cfg.targets_blob, norm_t[..]);
+            normalize_map_path(a, norm_t);
+            if norm_t.len == 0 {
+                norm_t.push('.');
+            }
+            append_nl_grow(targets_blob, norm_t[..]);
         }
         idx += 1;
     }
 
-    if cfg.targets_blob.len == 0 {
-        let _ = append_nl_bounded(cfg.targets_blob, ".");
+    if targets_blob.len == 0 {
+        append_nl_grow(targets_blob, ".");
     }
     return true;
 }
@@ -369,16 +395,49 @@ fn collect_default_bce_entries(targets_blob: const u8[:], out_entries: u8[>..]&)
 
 fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) -> i32 {
     var cfg = SlocCliArgs { .. };
+    var targets_blob:      u8[>..] = [];
+    var profile_tsvs_blob: u8[>..] = [];
+    var run_benches_blob:  u8[>..] = [];
+    var bce_entries_blob:  u8[>..] = [];
     var show_help = false;
-    guard parse_sloc_cli_args(all_args, lit_cfg, cfg, show_help) else { return 2; }
+    guard parse_sloc_cli_args(
+        all_args,
+        lit_cfg,
+        cfg,
+        targets_blob,
+        profile_tsvs_blob,
+        run_benches_blob,
+        bce_entries_blob,
+        show_help,
+    ) else { return 2; }
     if show_help {
         print_sloc_usage();
         return 0;
     }
 
-    let is_partial = !targets_are_full_repo(cfg.targets_blob[..]);
+    // Validate explicitly provided --map and --baseline paths early
+    var map_file: u8[..256] = [];
+    if cfg.map_path.len > 0 {
+        let _ = crap::set_bounded(map_file, cfg.map_path[..]);
+    } else if file_exists(".lit/sloc-map") {
+        let _ = crap::set_bounded(map_file, ".lit/sloc-map");
+    }
+    if cfg.explicit_map && (map_file.len == 0 || !file_exists(map_file[..])) {
+        write_stdout("Error: scope map file not found: ");
+        write_stdout(cfg.map_path[..]);
+        write_stdout("\n");
+        return 2;
+    }
+    if cfg.explicit_baseline && !cfg.save_baseline && !file_exists(cfg.baseline_path[..]) {
+        write_stdout("Error: baseline file not found: ");
+        write_stdout(cfg.baseline_path[..]);
+        write_stdout("\n");
+        return 2;
+    }
+
+    let is_partial = !targets_are_full_repo(targets_blob[..]);
     var files_blob: u8[>..] = [];
-    collect_dedup_sloc_files(cfg.targets_blob[..], cfg.include_tests, cfg.exclude_blob[..], files_blob);
+    collect_dedup_sloc_files(targets_blob[..], cfg.include_tests, cfg.exclude_blob[..], files_blob);
 
     var pool:  u8[>..]            = [];
     var files: FileSlocStats[>..] = [];
@@ -393,10 +452,10 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
     var bce_measured = false;
     if cfg.bce_enabled {
         var bce_entries: u8[>..] = [];
-        if cfg.bce_entries_blob.len > 0 {
-            bce_entries.append(cfg.bce_entries_blob[..]);
+        if bce_entries_blob.len > 0 {
+            bce_entries.append(bce_entries_blob[..]);
         } else {
-            collect_default_bce_entries(cfg.targets_blob[..], bce_entries);
+            collect_default_bce_entries(targets_blob[..], bce_entries);
         }
         bce_measured = attach_multi_entry_bce(bce_entries[..], pool[..], files);
     }
@@ -407,17 +466,18 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
         format_fails = check_goose_format_files(files_blob[..], format_bad);
     }
 
-    // Load optional scope map
-    var maps:     ScopeMapping[>..] = [];
-    var map_file: u8[..256]         = [];
-    if cfg.map_path.len > 0 {
-        let _ = crap::set_bounded(map_file, cfg.map_path[..]);
-    } else if file_exists(".lit/sloc-map") {
-        let _ = crap::set_bounded(map_file, ".lit/sloc-map");
-    }
+    // Load scope map
+    var maps: ScopeMapping[>..] = [];
     if map_file.len > 0 && file_exists(map_file[..]) {
         var map_raw: u8[>..] = [];
-        if read_file(map_file[..], map_raw) {
+        if !read_file(map_file[..], map_raw) {
+            if cfg.explicit_map {
+                write_stdout("Error: failed to read scope map: ");
+                write_stdout(map_file[..]);
+                write_stdout("\n");
+                return 2;
+            }
+        } else {
             let _ = parse_sloc_map(map_raw[..], pool, maps);
         }
     }
@@ -425,10 +485,10 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
     // Collect profile TSV samples (from --profile and/or --run-profile)
     var tsv_all: u8[>..] = [];
     var pstart:  i64     = 0;
-    while pstart < cfg.profile_tsvs_blob.len {
-        let nl = crap::slice_index_of_byte(cfg.profile_tsvs_blob[pstart..], '\n');
-        let end = if nl >= 0 { pstart + nl } else { cfg.profile_tsvs_blob.len };
-        let tsv_p = crap::trim_ascii(cfg.profile_tsvs_blob[pstart..end]);
+    while pstart < profile_tsvs_blob.len {
+        let nl = crap::slice_index_of_byte(profile_tsvs_blob[pstart..], '\n');
+        let end = if nl >= 0 { pstart + nl } else { profile_tsvs_blob.len };
+        let tsv_p = crap::trim_ascii(profile_tsvs_blob[pstart..end]);
         pstart = end + 1;
         guard tsv_p.len > 0 else { continue; }
         var one_tsv: u8[>..] = [];
@@ -442,10 +502,10 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
         tsv_all.push('\n');
     }
 
-    if cfg.run_profile_all || cfg.run_benches_blob.len > 0 {
+    if cfg.run_profile_all || run_benches_blob.len > 0 {
         var benches: u8[>..] = [];
-        if cfg.run_benches_blob.len > 0 {
-            benches.append(cfg.run_benches_blob[..]);
+        if run_benches_blob.len > 0 {
+            benches.append(run_benches_blob[..]);
         } else {
             collect_unique_map_benches(maps[..], pool[..], benches);
             if benches.len == 0 && lit_cfg.profile_target_buf.len > 0 {
@@ -491,14 +551,19 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
 
     if resolved_base.len > 0 && file_exists(resolved_base[..]) {
         var b_raw: u8[>..] = [];
-        if read_file(resolved_base[..], b_raw) {
-            let _ = parse_sloc_baseline(b_raw[..], base_pool, base, base_files, base_scopes);
+        if !read_file(resolved_base[..], b_raw) || !parse_sloc_baseline(b_raw[..], base_pool, base, base_files, base_scopes) {
+            if cfg.explicit_baseline && !cfg.save_baseline {
+                write_stdout("Error: failed to parse baseline file: ");
+                write_stdout(resolved_base[..]);
+                write_stdout("\n");
+                return 2;
+            }
         }
     }
 
     var scopes: CycleSlocRow[>..] = [];
     if maps.len > 0 {
-        correlate_scopes(maps[..], pool[..], files[..], samples[..], cfg.targets_blob[..], is_partial, scopes);
+        correlate_scopes(maps[..], pool[..], files[..], samples[..], targets_blob[..], is_partial, scopes);
     }
 
     var gate_res = SlocGateResult { .. };
@@ -507,7 +572,7 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
         var empty_b = SlocBaseline { .. };
         var empty_bf: SlocBaselineFile[>..]  = [];
         var empty_bs: SlocBaselineScope[>..] = [];
-        evaluate_sloc_gate(cfg, pool[..], files, scopes, empty_b, "", empty_bf[..], empty_bs[..], is_partial, format_fails, gate_res);
+        evaluate_sloc_gate(cfg, pool[..], maps[..], files, scopes, empty_b, "", empty_bf[..], empty_bs[..], is_partial, format_fails, gate_res);
         if gate_res.exit_code == 0 {
             var save_dst: u8[..256] = [];
             if cfg.save_baseline_path.len > 0 {
@@ -515,7 +580,7 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
             } else {
                 crap::default_save_sloc_baseline_path(lit_cfg.sloc_baseline_buf[..], save_dst);
             }
-            let preserve_cycles = !cfg.reset_cycles && samples.len == 0;
+            let preserve_cycles = !cfg.reset_cycles;
             var serialized: u8[>..] = [];
             serialize_sloc_baseline(
                 pool[..],
@@ -542,7 +607,7 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
             }
         }
     } else {
-        evaluate_sloc_gate(cfg, pool[..], files, scopes, base, base_pool[..], base_files[..], base_scopes[..], is_partial, format_fails, gate_res);
+        evaluate_sloc_gate(cfg, pool[..], maps[..], files, scopes, base, base_pool[..], base_files[..], base_scopes[..], is_partial, format_fails, gate_res);
     }
 
     var report: u8[>..] = [];

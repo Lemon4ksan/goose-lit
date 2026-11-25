@@ -53,6 +53,11 @@ extern fn native_exec_in_dir_with_env(
     timeout_ms: i32,
 ) -> i32 = "crap_exec_in_dir_with_env";
 extern fn native_abs_path(path: const u8[:], out: u8[:]) -> i64 = "crap_abs_path";
+extern fn native_exec_argv_nul_to_file(
+    argv_nul:   const u8[:],
+    out_path:   const u8[:],
+    timeout_ms: i32,
+) -> i32 = "crap_exec_argv_nul_to_file";
 
 fn resolve_abs_path(path: const u8[:], out: u8[>..]&) -> bool {
     guard path.len > 0 else { return false; }
@@ -61,6 +66,30 @@ fn resolve_abs_path(path: const u8[:], out: u8[>..]&) -> bool {
     guard n > 0 && n <= buf.len else { return false; }
     out.append(buf[..n]);
     return true;
+}
+
+// Runs a program with NUL-delimited arguments directly (no shell) and captures output into `out`.
+fn exec_argv_nul_capture(argv_nul: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32 {
+    let seq = native_next_seq();
+    ensure_lit_cache_dir();
+
+    var tmp_path: u8[>..] = [];
+    if is_dir(".lit/cache") {
+        tmp_path.append(".lit/cache/.gcrap_cmd_");
+    } else {
+        tmp_path.append(".gcrap_cmd_");
+    }
+    append_u64(tmp_path, clock_ns() as u64);
+    tmp_path.push('_');
+    append_u64(tmp_path, seq);
+    tmp_path.append(".tmp");
+
+    let rc = native_exec_argv_nul_to_file(argv_nul, tmp_path[..], timeout_ms);
+    if file_exists(tmp_path[..]) {
+        read_file(tmp_path[..], out);
+        delete_file(tmp_path[..]);
+    }
+    return rc;
 }
 
 var g_cache_dir_ready: bool = false;

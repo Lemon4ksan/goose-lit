@@ -859,3 +859,92 @@ GCRAP_WEAK int64_t crap_abs_path(crap_bytes_ro path, crap_bytes_rw out) {
     return len;
 #endif
 }
+
+// Executes a program with NUL-delimited argv bytes directly without invoking a shell.
+GCRAP_WEAK int32_t crap_exec_argv_nul_to_file(crap_bytes_ro argv_nul, crap_bytes_ro out_path, int32_t timeout_ms) {
+    g_last_exec_timed_out = 0;
+    if (!argv_nul.data || argv_nul.len <= 0) return -1;
+    char c_out[4096];
+    crap_slice_to_cstr(out_path, c_out, sizeof(c_out));
+    if (!c_out[0]) return -1;
+
+    char storage[16384];
+    if ((size_t)argv_nul.len >= sizeof(storage)) return -1;
+    memcpy(storage, argv_nul.data, (size_t)argv_nul.len);
+    storage[argv_nul.len] = '\0';
+
+    char *argv[65];
+    int argc = 0;
+    int64_t i = 0;
+    while (i < argv_nul.len && argc < 64) {
+        if (storage[i] != '\0') {
+            argv[argc++] = &storage[i];
+            while (i < argv_nul.len && storage[i] != '\0') i++;
+        }
+        i++;
+    }
+    if (argc == 0) return -1;
+    argv[argc] = NULL;
+
+#ifdef _WIN32
+    char cmd_line[16384];
+    cmd_line[0] = '\0';
+    size_t pos = 0;
+    for (int a = 0; a < argc; a++) {
+        pos = crap_append_win_quoted_arg(cmd_line, sizeof(cmd_line), pos, argv[a]);
+    }
+    wchar_t w_cmd[16384];
+    wchar_t w_out[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, cmd_line, -1, w_cmd, 16384) <= 0) return -1;
+    if (MultiByteToWideChar(CP_UTF8, 0, c_out, -1, w_out, 4096) <= 0) return -1;
+    return crap_win32_spawn_and_wait(w_cmd, w_out, timeout_ms);
+#else
+    int out_fd = open(c_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (out_fd < 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(out_fd);
+        return -1;
+    }
+    if (pid == 0) {
+        setpgid(0, 0);
+        dup2(out_fd, STDOUT_FILENO);
+        dup2(out_fd, STDERR_FILENO);
+        close(out_fd);
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    close(out_fd);
+    setpgid(pid, pid);
+
+    struct timespec start_ts, now_ts, sleep_ts;
+    clock_gettime(CLOCK_MONOTONIC, &start_ts);
+    sleep_ts.tv_sec = 0;
+    sleep_ts.tv_nsec = 5 * 1000 * 1000;
+
+    int status = 0;
+    for (;;) {
+        pid_t w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) {
+            if (WIFEXITED(status)) return (int32_t)WEXITSTATUS(status);
+            if (WIFSIGNALED(status)) return (int32_t)(128 + WTERMSIG(status));
+            return (int32_t)status;
+        }
+        if (w < 0) return -1;
+        if (timeout_ms > 0) {
+            clock_gettime(CLOCK_MONOTONIC, &now_ts);
+            int64_t elapsed_ms = (int64_t)(now_ts.tv_sec - start_ts.tv_sec) * 1000LL +
+                                 (int64_t)(now_ts.tv_nsec - start_ts.tv_nsec) / 1000000LL;
+            if (elapsed_ms >= (int64_t)timeout_ms) {
+                g_last_exec_timed_out = 1;
+                kill(-pid, SIGTERM);
+                nanosleep(&sleep_ts, NULL);
+                kill(-pid, SIGKILL);
+                waitpid(pid, &status, 0);
+                return 124;
+            }
+        }
+        nanosleep(&sleep_ts, NULL);
+    }
+#endif
+}

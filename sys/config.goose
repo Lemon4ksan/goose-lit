@@ -227,10 +227,15 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
     if key == "sloc_bce_entries" {
         var tmp_entries: u8[..1024] = [];
         append_exclude_patterns(val, tmp_entries);
-        let n = min(tmp_entries.len, cfg.sloc_bce_entries_buf.cap);
         cfg.sloc_bce_entries_buf.clear();
-        if n > 0 {
-            cfg.sloc_bce_entries_buf.append(tmp_entries[..n]);
+        var start: i64 = 0;
+        while start < tmp_entries.len {
+            let rel = slice_index_of_byte(tmp_entries[start..], '\n');
+            let end = if rel >= 0 { start + rel + 1 } else { tmp_entries.len };
+            let seg = tmp_entries[start..end];
+            start = end;
+            guard cfg.sloc_bce_entries_buf.len + seg.len <= cfg.sloc_bce_entries_buf.cap else { break; }
+            cfg.sloc_bce_entries_buf.append(seg);
         }
         return true;
     }
