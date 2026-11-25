@@ -52,3 +52,4 @@ import sloc.scanner;
 import sloc.correlate;
 import sloc.baseline;
 import sloc.report;
+import sloc.cli;

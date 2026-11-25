@@ -23,6 +23,7 @@ fn print_usage() {
     write_stdout("  gate <path|file> [max] Verify G-CRAP complexity and bounds safety gate (default ceiling: 25)\n");
     write_stdout("  crap <path|file>       Run integrated G-CRAP complexity and safety risk radar\n");
     write_stdout("  profile [bench.goose]  Build and run stage profiler / testing.B benchmark suite\n");
+    write_stdout("  sloc [path...]         Run cycles-vs-SLOC radar, anti-packing, smells & Pareto gate\n");
     write_stdout("  fuzz [entry.goose]     Build and run SanCov / libFuzzer coverage-guided fuzzer\n");
     write_stdout("  inspect <file|hex>     Dump byte buffer in hex/ASCII or 128-bit SIMD lanes\n");
     write_stdout("  version, -V, --version Print version\n");
@@ -742,6 +743,12 @@ fn main() {
 
     if first == "profile" {
         let rc = lit::handle_profile_cli(all_args[..], lit_cfg);
+        sys_exit(rc);
+        return;
+    }
+
+    if first == "sloc" {
+        let rc = lit::handle_sloc_cli(all_args[..], lit_cfg);
         sys_exit(rc);
         return;
     }

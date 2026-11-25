@@ -2,6 +2,13 @@
 // Copyright (c) 2026 Lemon4ksan
 
 // RUN: goose %s | %FileCheck %s
+// RUN: %lit sloc --help | %FileCheck %s --prefix HELP
+// RUN: %lit sloc %s --no-baseline --include-tests --smells --format json | %FileCheck %s --prefix JSON
+// RUN: %lit sloc %s --no-baseline --include-tests --check-packing | %FileCheck %s --prefix PACK
+
+// HELP: Usage: goose-lit sloc
+// JSON: "verdict": "UNCHANGED"
+// PACK: Verdict: UNCHANGED
 
 import std;
 import os;

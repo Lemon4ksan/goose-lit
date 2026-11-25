@@ -61,6 +61,13 @@ goose-lit/
 │   └── lit_runner.goose     # // RUN: directive parser, %alloc_hook/%prof_hook/%fuzz_driver
 ├── profile/
 │   └── cli.goose            # Stage profiler & testing.B benchstat CLI runner
+├── sloc/
+│   ├── model.goose          # Cycles-vs-SLOC metrics, smells, baseline & gate structs
+│   ├── scanner.goose        # Single-pass SLOC/stmt/comment/smell/dead_fn/BCE scanner
+│   ├── correlate.goose      # .lit/sloc-map parser & RDTSC bench/stage correlator
+│   ├── baseline.goose       # Baseline v1 persistence & Pareto/ratchet gate engine
+│   ├── report.goose         # Table, Markdown, JSON, TSV & Self-Audit formatters
+│   └── cli.goose            # CLI argument parser & orchestrator for `goose-lit sloc`
 ├── fuzz/
 │   └── cli.goose            # SanCov / libFuzzer build & campaign CLI runner
 ├── wire/
