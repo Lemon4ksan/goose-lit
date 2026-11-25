@@ -391,7 +391,10 @@ fn evaluate_sloc_gate(
                 if bf.bce_kept >= 0 {
                     sub_base_bce += bf.bce_kept;
                 }
-                if cfg.check_packing && f.sloc < bf.sloc && f.stmts >= bf.stmts && (f.packing_x100 - bf.packing_x100) > 15 {
+                let delta_pack_gaming = f.sloc < bf.sloc && f.stmts >= bf.stmts &&
+                    (f.packing_x100 - bf.packing_x100) > 15 &&
+                    (f.packing_x100 > 100 || (bf.tokens > 0 && f.tokens * 100 >= bf.tokens * 95));
+                if cfg.check_packing && delta_pack_gaming {
                     f.packing_delta_violation = true;
                     res.audit.packing_violations += 1;
                 }
