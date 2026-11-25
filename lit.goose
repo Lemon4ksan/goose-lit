@@ -45,3 +45,7 @@ import crap.crap;
 import cov.cli;
 import profile.cli;
 import fuzz.cli;
+
+// ---- cycles-vs-SLOC engine -------------------------------------------------
+import sloc.model;
+import sloc.scanner;
