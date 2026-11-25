@@ -94,11 +94,81 @@ fn test_dead_fn_ignores_test_callers() {
     assert(!saw_ufcs);
 }
 
+fn test_sloc_map_and_crlf() {
+    let raw_map: const u8[:] = "# comment line\r\nL0_GET | bench | http\\, wire\\ | bench\\server.goose\r\n*::http1.parse | stage | http/\r\n";
+    var pool: u8[>..]                = [];
+    var maps: lit::ScopeMapping[>..] = [];
+    let count = lit::parse_sloc_map(raw_map, pool, maps);
+    assert(count == 2);
+    assert(crap::pool_slice(pool[..], maps[0].name_off, maps[0].name_len) == "L0_GET");
+    assert(maps[0].kind == lit::SLOC_SCOPE_BENCH);
+    assert(crap::pool_slice(pool[..], maps[0].prefixes_off, maps[0].prefixes_len) == "http/,wire/");
+    assert(crap::pool_slice(pool[..], maps[0].bench_off, maps[0].bench_len) == "bench/server.goose");
+
+    assert(crap::pool_slice(pool[..], maps[1].name_off, maps[1].name_len) == "*::http1.parse");
+    assert(maps[1].kind == lit::SLOC_SCOPE_STAGE);
+    assert(crap::pool_slice(pool[..], maps[1].prefixes_off, maps[1].prefixes_len) == "http/");
+    assert(maps[1].bench_len == 0);
+}
+
+fn test_correlate_bench_and_stages() {
+    let map_src: const u8[:] = "Hot_Case | bench | hot/\nBal_Case | bench | bal/\nCold_Case | bench | cold/\nMiss_Case | bench | miss/\nHot_Case::stage.a | stage | hot/\n*::stage.a | stage | hot/\n";
+    var pool: u8[>..]                = [];
+    var maps: lit::ScopeMapping[>..] = [];
+    assert(lit::parse_sloc_map(map_src, pool, maps) == 6);
+
+    var files: lit::FileSlocStats[>..] = [];
+    let p_hot_o, p_hot_l = crap::pool_add(pool, "hot/k.goose");
+    files.push(lit::FileSlocStats { path_off: p_hot_o, path_len: p_hot_l, sloc: 100, stmts: 80, .. });
+    let p_bal_o, p_bal_l = crap::pool_add(pool, "bal/b.goose");
+    files.push(lit::FileSlocStats { path_off: p_bal_o, path_len: p_bal_l, sloc: 200, stmts: 160, .. });
+    let p_cold_o, p_cold_l = crap::pool_add(pool, "cold/c.goose");
+    files.push(lit::FileSlocStats { path_off: p_cold_o, path_len: p_cold_l, sloc: 1000, stmts: 800, .. });
+    let p_miss_o, p_miss_l = crap::pool_add(pool, "miss/m.goose");
+    files.push(lit::FileSlocStats { path_off: p_miss_o, path_len: p_miss_l, sloc: 50, stmts: 40, .. });
+
+    let tsv: const u8[:] = "@LIT_BENCH\tSuite\tHot_Case\t100\t10.0\t250.0\t100.0\t0\t0\t0\t0\t0\t-\r\n@LIT_BENCH\tSuite\tBal_Case\t100\t10.0\t100.0\t100.0\t0\t0\t0\t0\t0\t-\r\n@LIT_BENCH\tSuite\tCold_Case\t100\t10.0\t50.0\t100.0\t0\t0\t0\t0\t0\t-\r\n@LIT_STAGE\tHot_Case\tstage.a\t100\t40.0\t40.0\t40\t40\t100.0\t0\t0\t0\t0\r\n@LIT_STAGE\tOther_Case\tstage.a\t300\t80.0\t80.0\t80\t80\t100.0\t0\t0\t0\t0\r\n";
+    var samples: lit::ProfileSample[>..] = [];
+    assert(lit::parse_profile_tsv_samples(tsv, samples) == 5);
+
+    var rows: lit::CycleSlocRow[>..] = [];
+    lit::correlate_scopes(maps[..], pool[..], files[..], samples[..], "", false, rows);
+    assert(rows.len == 6);
+
+    // Hot_Case: C=250.0 (2500 x10), L=100 => cyc/SLOC = 2.50 (250 x100) => HOT_KERNEL, CL = 25000.0 (250000 x10)
+    assert(rows[0].cycles_x10 == 2500);
+    assert(rows[0].cyc_per_sloc_x100 == 250);
+    assert(rows[0].cl_x10 == 250000);
+    assert(rows[0].radar == lit::SLOC_RADAR_HOT_KERNEL);
+
+    // Bal_Case: C=100.0, L=200 => cyc/SLOC = 0.50 (50 x100) => BALANCED
+    assert(rows[1].cyc_per_sloc_x100 == 50);
+    assert(rows[1].radar == lit::SLOC_RADAR_BALANCED);
+
+    // Cold_Case: C=50.0, L=1000 => cyc/SLOC = 0.05 (5 x100) => COLD_BLOAT
+    assert(rows[2].cyc_per_sloc_x100 == 5);
+    assert(rows[2].radar == lit::SLOC_RADAR_COLD_BLOAT);
+
+    // Miss_Case: C=0 => UNPROFILED
+    assert(rows[3].cycles_x10 == 0);
+    assert(rows[3].radar == lit::SLOC_RADAR_UNPROFILED);
+
+    // Exact stage Hot_Case::stage.a => 40.0 cyc (400 x10)
+    assert(rows[4].cycles_x10 == 400);
+    assert(rows[4].cyc_per_sloc_x100 == 40);
+
+    // Weighted wildcard *::stage.a => (100*40.0 + 300*80.0) / 400 = 70.0 cyc (700 x10)
+    assert(rows[5].cycles_x10 == 700);
+    assert(rows[5].cyc_per_sloc_x100 == 70);
+}
+
 fn main() {
     test_sloc_and_guard_stmts();
     test_multiline_string_and_nested_comments();
     test_local_smells_detection();
     test_dead_fn_ignores_test_callers();
+    test_sloc_map_and_crlf();
+    test_correlate_bench_and_stages();
     print("SLOC_TEST: PASS");
 }
 

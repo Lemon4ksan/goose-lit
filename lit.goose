@@ -49,3 +49,4 @@ import fuzz.cli;
 // ---- cycles-vs-SLOC engine -------------------------------------------------
 import sloc.model;
 import sloc.scanner;
+import sloc.correlate;
