@@ -38,6 +38,11 @@ typedef struct {
     int64_t len;
 } crap_bytes_ro;
 
+typedef struct {
+    uint8_t *data;
+    int64_t len;
+} crap_bytes_rw;
+
 #define GCRAP_MAX_BRANCHES 262144
 
 static uint64_t g_crap_hits[GCRAP_MAX_BRANCHES];
@@ -814,4 +819,43 @@ GCRAP_WEAK int32_t crap_exec_with_env_to_file(crap_bytes_ro cmd, crap_bytes_ro e
                                                crap_bytes_ro out_path, int32_t timeout_ms) {
     crap_bytes_ro empty_dir = {NULL, 0};
     return crap_exec_in_dir_with_env(empty_dir, cmd, env_key, env_val, out_path, timeout_ms);
+}
+
+GCRAP_WEAK int64_t crap_abs_path(crap_bytes_ro path, crap_bytes_rw out) {
+    if (!path.data || path.len <= 0 || !out.data || out.len <= 0) return -1;
+    char c_path[4096];
+    crap_slice_to_cstr(path, c_path, sizeof(c_path));
+    if (!c_path[0]) return -1;
+#ifdef _WIN32
+    wchar_t w_in[4096];
+    wchar_t w_abs[4096];
+    if (MultiByteToWideChar(CP_UTF8, 0, c_path, -1, w_in, 4096) <= 0) return -1;
+    DWORD wn = GetFullPathNameW(w_in, 4096, w_abs, NULL);
+    if (wn == 0 || wn >= 4096) return -1;
+    char utf8[4096];
+    int n = WideCharToMultiByte(CP_UTF8, 0, w_abs, -1, utf8, (int)sizeof(utf8), NULL, NULL);
+    if (n <= 1) return -1;
+    int64_t len = (int64_t)(n - 1);
+    if (len > out.len) return -1;
+    memcpy(out.data, utf8, (size_t)len);
+    return len;
+#else
+    char resolved[4096];
+    const char *src = NULL;
+    if (realpath(c_path, resolved) != NULL) {
+        src = resolved;
+    } else if (c_path[0] == '/') {
+        src = c_path;
+    } else {
+        char cwd[4096];
+        if (getcwd(cwd, sizeof(cwd)) == NULL) return -1;
+        int written = snprintf(resolved, sizeof(resolved), "%s/%s", cwd, c_path);
+        if (written <= 0 || (size_t)written >= sizeof(resolved)) return -1;
+        src = resolved;
+    }
+    int64_t len = (int64_t)strlen(src);
+    if (len <= 0 || len > out.len) return -1;
+    memcpy(out.data, src, (size_t)len);
+    return len;
+#endif
 }

@@ -10,34 +10,44 @@ import os;
 import sys.bytes;
 
 struct LitConfig {
-    baseline_buf:        u8[..256]  = [],
-    tests_dir_buf:       u8[..256]  = [],
-    src_dir_buf:         u8[..256]  = [],
-    cc_buf:              u8[..256]  = [],
-    cc_source_buf:       u8[..32]   = [],
-    test_mode_buf:       u8[..32]   = [],
-    test_exec_buf:       u8[..256]  = [],
-    exclude_buf:         u8[..1024] = [],
-    format_buf:          u8[..32]   = [],
-    prefix_buf:          u8[..32]   = [],
-    cov_profile_buf:     u8[..256]  = [],
-    profile_target_buf:  u8[..256]  = [],
-    fuzz_entry_buf:      u8[..256]  = [],
-    fuzz_extra_c_buf:    u8[..1024] = [],
-    fuzz_extra_libs_buf: u8[..256]  = [],
-    gate_ceiling:        f64        = 25.0,
-    has_gate_ceiling:    bool       = false,
-    delta_threshold:     f64        = 5.0,
-    has_delta:           bool       = false,
-    timeout_sec:         i64        = 60,
-    has_timeout:         bool       = false,
-    jobs:                i64        = 0,
-    has_jobs:            bool       = false,
-    include_tests:       bool       = false,
-    has_include_tests:   bool       = false,
-    bce_enabled:         bool       = true,
-    has_bce:             bool       = false,
-    loaded:              bool       = false,
+    baseline_buf:         u8[..256]  = [],
+    tests_dir_buf:        u8[..256]  = [],
+    src_dir_buf:          u8[..256]  = [],
+    cc_buf:               u8[..256]  = [],
+    cc_source_buf:        u8[..32]   = [],
+    test_mode_buf:        u8[..32]   = [],
+    test_exec_buf:        u8[..256]  = [],
+    exclude_buf:          u8[..1024] = [],
+    format_buf:           u8[..32]   = [],
+    prefix_buf:           u8[..32]   = [],
+    cov_profile_buf:      u8[..256]  = [],
+    profile_target_buf:   u8[..256]  = [],
+    fuzz_entry_buf:       u8[..256]  = [],
+    fuzz_extra_c_buf:     u8[..1024] = [],
+    fuzz_extra_libs_buf:  u8[..256]  = [],
+    sloc_baseline_buf:    u8[..256]  = [],
+    sloc_map_buf:         u8[..256]  = [],
+    sloc_exclude_buf:     u8[..1024] = [],
+    sloc_bce_entries_buf: u8[..512]  = [],
+    gate_ceiling:         f64        = 25.0,
+    has_gate_ceiling:     bool       = false,
+    delta_threshold:      f64        = 5.0,
+    has_delta:            bool       = false,
+    sloc_max_packing:     f64        = 1.35,
+    has_sloc_max_packing: bool       = false,
+    sloc_max_delta:       i64        = 0,
+    has_sloc_max_delta:   bool       = false,
+    sloc_cycle_noise:     f64        = 5.0,
+    has_sloc_cycle_noise: bool       = false,
+    timeout_sec:          i64        = 60,
+    has_timeout:          bool       = false,
+    jobs:                 i64        = 0,
+    has_jobs:             bool       = false,
+    include_tests:        bool       = false,
+    has_include_tests:    bool       = false,
+    bce_enabled:          bool       = true,
+    has_bce:              bool       = false,
+    loaded:               bool       = false,
 }
 
 fn strip_config_value(raw: const u8[:]) -> const u8[:] {
@@ -202,6 +212,28 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
         append_exclude_patterns(val, cfg.fuzz_extra_c_buf);
         return true;
     }
+    if key == "sloc_baseline" {
+        set_bounded(cfg.sloc_baseline_buf, val);
+        return true;
+    }
+    if key == "sloc_map" {
+        set_bounded(cfg.sloc_map_buf, val);
+        return true;
+    }
+    if key == "sloc_exclude" {
+        append_exclude_patterns(val, cfg.sloc_exclude_buf);
+        return true;
+    }
+    if key == "sloc_bce_entries" {
+        var tmp_entries: u8[..1024] = [];
+        append_exclude_patterns(val, tmp_entries);
+        let n = min(tmp_entries.len, cfg.sloc_bce_entries_buf.cap);
+        cfg.sloc_bce_entries_buf.clear();
+        if n > 0 {
+            cfg.sloc_bce_entries_buf.append(tmp_entries[..n]);
+        }
+        return true;
+    }
     let host_os = native_host_os();
     let is_os_libs = key == "fuzz_extra_libs" ||
         (host_os == 1 && key == "fuzz_extra_libs_windows") ||
@@ -265,6 +297,30 @@ fn apply_numeric_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) ->
         if ok && ival > 0 {
             cfg.jobs = ival;
             cfg.has_jobs = true;
+        }
+        return true;
+    }
+    if key == "sloc_max_packing" {
+        let fval, ok = parse_f64_slice(val);
+        if ok && fval > 0.0 {
+            cfg.sloc_max_packing = fval;
+            cfg.has_sloc_max_packing = true;
+        }
+        return true;
+    }
+    if key == "sloc_max_delta" {
+        let ival, ok = parse_i64_slice(val);
+        if ok && ival >= 0 {
+            cfg.sloc_max_delta = ival;
+            cfg.has_sloc_max_delta = true;
+        }
+        return true;
+    }
+    if key == "sloc_cycle_noise" {
+        let fval, ok = parse_f64_slice(val);
+        if ok && fval >= 0.0 {
+            cfg.sloc_cycle_noise = fval;
+            cfg.has_sloc_cycle_noise = true;
         }
         return true;
     }
@@ -422,5 +478,29 @@ fn default_save_baseline_path(configured_baseline: const u8[:], out: u8[..256]&)
         set_bounded(out, ".lit/baseline");
     } else {
         set_bounded(out, ".lit-baseline");
+    }
+}
+
+fn resolve_sloc_baseline_path(configured: const u8[:], out: u8[..256]&) -> bool {
+    if configured.len > 0 && file_exists(configured) {
+        return set_bounded(out, configured);
+    }
+    if file_exists(".lit/sloc-baseline") {
+        return set_bounded(out, ".lit/sloc-baseline");
+    }
+    if file_exists("../.lit/sloc-baseline") {
+        return set_bounded(out, "../.lit/sloc-baseline");
+    }
+    return false;
+}
+
+fn default_save_sloc_baseline_path(configured: const u8[:], out: u8[..256]&) {
+    if configured.len > 0 && set_bounded(out, configured) {
+        return;
+    }
+    if is_dir(".lit") || make_dir(".lit") {
+        set_bounded(out, ".lit/sloc-baseline");
+    } else {
+        set_bounded(out, ".lit-sloc-baseline");
     }
 }

@@ -72,6 +72,43 @@ fn test_parse_config() {
 
     let _, ok_ovf_u64 = crap::parse_u64_slice("18446744073709551616");
     assert(!ok_ovf_u64);
+
+    // Verify sloc_* config keys and absolute path resolution
+    crap::parse_config_line("sloc_baseline = .lit/custom-sloc-baseline", cfg);
+    assert(cfg.sloc_baseline_buf == ".lit/custom-sloc-baseline");
+
+    crap::parse_config_line("sloc_map = .lit/custom-sloc-map", cfg);
+    assert(cfg.sloc_map_buf == ".lit/custom-sloc-map");
+
+    crap::parse_config_line("sloc_exclude = tests/, bench/, tools/", cfg);
+    assert(crap::is_excluded_path("bench/foo.goose", cfg.sloc_exclude_buf[..]));
+    assert(!crap::is_excluded_path("http/parser.goose", cfg.sloc_exclude_buf[..]));
+
+    crap::parse_config_line("sloc_bce_entries = core.goose, wing.goose", cfg);
+    assert(crap::slice_contains(cfg.sloc_bce_entries_buf[..], "core.goose"));
+    assert(crap::slice_contains(cfg.sloc_bce_entries_buf[..], "wing.goose"));
+
+    crap::parse_config_line("sloc_max_packing = 1.40", cfg);
+    assert(cfg.has_sloc_max_packing);
+    assert(cfg.sloc_max_packing > 1.39 && cfg.sloc_max_packing < 1.41);
+
+    crap::parse_config_line("sloc_max_delta = 12", cfg);
+    assert(cfg.has_sloc_max_delta);
+    assert(cfg.sloc_max_delta == 12);
+
+    crap::parse_config_line("sloc_cycle_noise = 7.5", cfg);
+    assert(cfg.has_sloc_cycle_noise);
+    assert(cfg.sloc_cycle_noise > 7.4 && cfg.sloc_cycle_noise < 7.6);
+
+    var sloc_save_buf: u8[..256] = [];
+    crap::default_save_sloc_baseline_path(cfg.sloc_baseline_buf[..], sloc_save_buf);
+    assert(sloc_save_buf == ".lit/custom-sloc-baseline");
+
+    var abs_buf: u8[>..] = [];
+    let ok_abs = crap::resolve_abs_path("bin.goose", abs_buf);
+    assert(ok_abs);
+    assert(abs_buf.len > 9);
+    assert(crap::slice_ends_with(abs_buf[..], "bin.goose"));
 }
 
 fn main() {

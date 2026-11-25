@@ -52,6 +52,16 @@ extern fn native_exec_in_dir_with_env(
     out_path:   const u8[:],
     timeout_ms: i32,
 ) -> i32 = "crap_exec_in_dir_with_env";
+extern fn native_abs_path(path: const u8[:], out: u8[:]) -> i64 = "crap_abs_path";
+
+fn resolve_abs_path(path: const u8[:], out: u8[>..]&) -> bool {
+    guard path.len > 0 else { return false; }
+    var buf: u8[4096] = [0; 4096];
+    let n = native_abs_path(path, buf[..]);
+    guard n > 0 && n <= buf.len else { return false; }
+    out.append(buf[..n]);
+    return true;
+}
 
 var g_cache_dir_ready: bool = false;
 

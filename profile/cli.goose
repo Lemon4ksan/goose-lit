@@ -337,8 +337,15 @@ fn handle_profile_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig
     var b_cmd: u8[>..] = [];
     b_cmd.append("goose build -O2");
     if cfg.cc.len > 0 {
+        var resolved_cc: u8[>..] = [];
+        let has_sep = crap::slice_index_of_byte(cfg.cc, '/') >= 0 || crap::slice_index_of_byte(cfg.cc, '\\') >= 0;
+        let cc_arg = if has_sep && crap::resolve_abs_path(cfg.cc, resolved_cc) {
+            resolved_cc[..]
+        } else {
+            cfg.cc
+        };
         b_cmd.append(" --cc ");
-        append_quoted(b_cmd, cfg.cc);
+        append_quoted(b_cmd, cc_arg);
     }
     b_cmd.append(" --include ");
     append_quoted(b_cmd, hook_h[..]);
