@@ -4,8 +4,8 @@
 /* shim/cov_rt.h - Self-contained branch coverage counter runtime for goose-lit.
    Splice into instrumented test builds via:
        goose build --include shim/cov_rt.h ...
-   Defines weak crap_cov_hit / crap_cov_dump symbols so standalone tests without
-   shim/proc.c and tests that also import goose-lit both link cleanly. */
+   Defines crap_cov_hit so standalone instrumented tests link cleanly across
+   POSIX and Windows without shim/proc.c. */
 
 #ifndef GCRAP_COV_RT_H
 #define GCRAP_COV_RT_H
@@ -24,7 +24,7 @@
 #include <windows.h>
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
+#if !defined(_WIN32) && (defined(__GNUC__) || defined(__clang__))
 #define GCRAP_COV_WEAK __attribute__((weak))
 #else
 #define GCRAP_COV_WEAK

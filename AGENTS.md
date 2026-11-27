@@ -144,8 +144,10 @@ or temp capture files in CLI modules. Reuse these `crap::` helpers from
   (`while rem.len > 0`) over manual index loops (`while i < xs.len`). Avoid
   table indexing for hex nibbles when simple arithmetic removes bounds checks.
 - Compile C11 shims (`shim/*.c`, `shim/*.h`) cleanly with
-  `gcc -std=c11 -Wall -Wextra -Werror` on Windows and POSIX. Keep weak symbols
-  (`GCRAP_WEAK` / `GCRAP_COV_WEAK`) and Unix LF (`\n`) endings.
+  `gcc -std=c11 -Wall -Wextra -Werror` on Windows and POSIX. Scope weak symbols
+  (`GCRAP_WEAK` / `GCRAP_COV_WEAK`) to non-Windows targets for PE/COFF
+  compatibility. Use Unix LF (`\n`) endings and built-in `exit(code)` instead of
+  `extern fn ... = "exit"` so package JIT tables do not collide with libtcc.
   [`runner/lit_runner.goose`](runner/lit_runner.goose) embeds `alloc_hook.h`,
   `prof_hook.h`, `cov_rt.h`, and `fuzz_driver.c` through `embed_file` so
   standalone release binaries work without a sibling `shim/` directory.

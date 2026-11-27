@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Lemon4ksan
 
-// shim/proc.c - Process execution and branch probe counter runtime for goose-crap.
+// shim/proc.c - Process execution and host runtime helpers for goose-lit.
 // Conforms to Goose slice ABI (spec section 7.10).
 
 #ifndef _GNU_SOURCE
@@ -27,7 +27,7 @@
 #include <time.h>
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
+#if !defined(_WIN32) && (defined(__GNUC__) || defined(__clang__))
 #define GCRAP_WEAK __attribute__((weak))
 #else
 #define GCRAP_WEAK
@@ -43,10 +43,6 @@ typedef struct {
     int64_t len;
 } crap_bytes_rw;
 
-#define GCRAP_MAX_BRANCHES 262144
-
-static uint64_t g_crap_hits[GCRAP_MAX_BRANCHES];
-static int g_crap_atexit_registered = 0;
 static uint64_t g_crap_seq = 0;
 static int32_t g_crap_work_next = 0;
 static int32_t g_crap_stop_flag = 0;
@@ -59,60 +55,6 @@ static void crap_slice_to_cstr(crap_bytes_ro s, char *out, size_t max_out) {
     size_t n = (size_t)s.len < (max_out - 1) ? (size_t)s.len : (max_out - 1);
     memcpy(out, s.data, n);
     out[n] = '\0';
-}
-
-static int crap_write_hits_to_file(const char *path) {
-    if (!path || !path[0]) return -1;
-    char clean_path[4096];
-    size_t len = strlen(path);
-    while (len > 0 &&
-           (path[len - 1] == ' ' || path[len - 1] == '\t' || path[len - 1] == '\r' || path[len - 1] == '\n')) {
-        len--;
-    }
-    if (len == 0 || len >= sizeof(clean_path)) return -1;
-    memcpy(clean_path, path, len);
-    clean_path[len] = '\0';
-
-#ifdef _WIN32
-    wchar_t wpath[4096];
-    int wn = MultiByteToWideChar(CP_UTF8, 0, clean_path, -1, wpath, 4096);
-    if (wn <= 0) return -1;
-    FILE *f = _wfopen(wpath, L"wb");
-#else
-    FILE *f = fopen(clean_path, "wb");
-#endif
-    if (!f) return -1;
-    for (int i = 0; i < GCRAP_MAX_BRANCHES; i++) {
-        if (g_crap_hits[i] > 0) {
-            fprintf(f, "id %d %llu\n", i, (unsigned long long)g_crap_hits[i]);
-        }
-    }
-    fclose(f);
-    return 0;
-}
-
-static void crap_atexit_dump(void) {
-    const char *env_path = getenv("GCRAP_PROFILE_OUT");
-    if (env_path && env_path[0]) {
-        crap_write_hits_to_file(env_path);
-    }
-}
-
-// Records a branch hit at runtime. Safe under -O2 because extern calls are observable.
-GCRAP_WEAK void crap_cov_hit(int32_t id) {
-    if (!g_crap_atexit_registered) {
-        g_crap_atexit_registered = 1;
-        atexit(crap_atexit_dump);
-    }
-    if ((uint32_t)id < GCRAP_MAX_BRANCHES) {
-#if defined(__GNUC__) || defined(__clang__)
-        __atomic_fetch_add(&g_crap_hits[id], 1ULL, __ATOMIC_RELAXED);
-#elif defined(_MSC_VER)
-        InterlockedIncrement64((volatile LONG64 *)&g_crap_hits[id]);
-#else
-        g_crap_hits[id]++;
-#endif
-    }
 }
 
 #if defined(_MSC_VER)

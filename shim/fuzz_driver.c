@@ -1032,7 +1032,7 @@ NO_SANITIZE_COV int main(int argc, char **argv) {
                         "FAIL RSS_DRIFT_EXCEEDED iter=%" PRIu64 " baseline_rss=%" PRIu64 " peak_rss=%" PRIu64
                         " final_rss=%" PRIu64 " driver_corpus_bytes=%zu"
                         " target_drift_kb=%.2f limit_kb=%" PRIu64 "\n",
-                        iter + 1ULL, baseline_rss, peak_rss, cur_rss, g_driver_corpus_bytes, (double)drift / 1024.0,
+                        actual_iters, baseline_rss, peak_rss, cur_rss, g_driver_corpus_bytes, (double)drift / 1024.0,
                         g_max_rss_drift_kb);
                 return EXIT_FAILURE;
             }

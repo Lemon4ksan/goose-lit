@@ -6,8 +6,6 @@ import std;
 import os;
 import cli from ".";
 
-extern fn sys_exit(code: i32) = "exit";
-
 const LIT_VERSION_BYTES: const u8[:] = embed_file("version.txt");
 
 fn print_usage() {
@@ -494,8 +492,7 @@ fn main() {
         if all_args[ci] == "--config" {
             if ci + 1 >= all_args.len {
                 write_stdout("Error: --config requires a file path\n");
-                sys_exit(2);
-                return;
+                exit(2);
             }
             custom_config = all_args[ci + 1];
             break;
@@ -508,12 +505,10 @@ fn main() {
         let cfg_tests = lit_cfg.tests_dir_buf[..];
         if cfg_tests.len > 0 && (is_dir(cfg_tests) || file_exists(cfg_tests)) {
             let rc = run_lit_suite(cfg_tests, false, false, false, 0, "", false, false, lit_cfg);
-            sys_exit(rc);
-            return;
+            exit(rc);
         } else if is_dir("tests") || file_exists("tests") {
             let rc = run_lit_suite("tests", false, false, false, 0, "", false, false, lit_cfg);
-            sys_exit(rc);
-            return;
+            exit(rc);
         }
         print_usage();
         return;
@@ -536,8 +531,7 @@ fn main() {
     if first == "not" {
         guard all_args.len > 2 else {
             write_stdout("Error: not requires a command to run\n");
-            sys_exit(2);
-            return;
+            exit(2);
         }
         var cmd_str: u8[>..] = [];
         for idx in 2..all_args.len {
@@ -548,11 +542,10 @@ fn main() {
         let rc = crap::exec_capture(cmd_str[..], run_out);
         write_stdout(run_out[..]);
         if rc == 0 {
-            sys_exit(1);
+            exit(1);
         } else {
-            sys_exit(0);
+            exit(0);
         }
-        return;
     }
 
     if first == "filecheck" {
@@ -569,8 +562,7 @@ fn main() {
             if a == "--prefix" || a == "-prefix" {
                 guard idx + 1 < all_args.len else {
                     write_stdout("Error: --prefix requires a prefix string\n");
-                    sys_exit(2);
-                    return;
+                    exit(2);
                 }
                 crap::set_bounded(prefix_buf, all_args[idx + 1]);
                 idx++;
@@ -580,33 +572,28 @@ fn main() {
                 write_stdout("Error: unknown option for filecheck: ");
                 write_stdout(a);
                 write_stdout("\n");
-                sys_exit(2);
-                return;
+                exit(2);
             } else if file_target.len == 0 {
                 file_target = a;
             } else {
                 write_stdout("Error: unexpected argument for filecheck: ");
                 write_stdout(a);
                 write_stdout("\n");
-                sys_exit(2);
-                return;
+                exit(2);
             }
             idx++;
         }
         guard file_target.len > 0 else {
             write_stdout("Error: filecheck requires a test source file\n");
-            sys_exit(2);
-            return;
+            exit(2);
         }
         let rc = handle_filecheck(file_target, prefix_buf[..]);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "gate" || first == "crap" {
         let rc = crap::run_crap_cli();
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "inspect" {
@@ -633,14 +620,12 @@ fn main() {
             } else if a == "--offset" {
                 guard idx + 1 < all_args.len else {
                     write_stdout("Error: --offset requires a numeric value\n");
-                    sys_exit(2);
-                    return;
+                    exit(2);
                 }
                 let num, ok = crap::parse_i64_slice(all_args[idx + 1]);
                 guard ok && num >= 0 else {
                     write_stdout("Error: invalid --offset value\n");
-                    sys_exit(2);
-                    return;
+                    exit(2);
                 }
                 offset = num;
                 idx++;
@@ -650,52 +635,44 @@ fn main() {
                 write_stdout("Error: unknown option for inspect: ");
                 write_stdout(a);
                 write_stdout("\n");
-                sys_exit(2);
-                return;
+                exit(2);
             } else if target.len == 0 {
                 target = a;
             }
             idx++;
         }
         let rc = handle_inspect(target, is_simd, simd_byte, offset);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "check" {
         let rc = lit::handle_check_cli(all_args[..], lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "cov" {
         let rc = lit::handle_cov_cli(all_args[..], lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "verify" {
         let rc = lit::handle_verify_cli(all_args[..], lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "profile" {
         let rc = lit::handle_profile_cli(all_args[..], lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "sloc" {
         let rc = lit::handle_sloc_cli(all_args[..], lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if first == "fuzz" {
         let rc = lit::handle_fuzz_cli(all_args[..], lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     // Default mode: lit test runner over path or file
@@ -724,8 +701,7 @@ fn main() {
         } else if a == "-j" || a == "--jobs" {
             guard idx + 1 < all_args.len else {
                 write_stdout("Error: --jobs requires a positive integer or 'auto'\n");
-                sys_exit(2);
-                return;
+                exit(2);
             }
             let j_arg = all_args[idx + 1];
             if j_arg == "auto" {
@@ -734,8 +710,7 @@ fn main() {
                 let j_val, ok = crap::parse_i64_slice(j_arg);
                 guard ok && j_val > 0 else {
                     write_stdout("Error: --jobs must be a positive integer or 'auto'\n");
-                    sys_exit(2);
-                    return;
+                    exit(2);
                 }
                 jobs = j_val;
             }
@@ -743,22 +718,19 @@ fn main() {
         } else if a == "--filter" {
             guard idx + 1 < all_args.len else {
                 write_stdout("Error: --filter requires a glob pattern\n");
-                sys_exit(2);
-                return;
+                exit(2);
             }
             filter_glob = all_args[idx + 1];
             idx++;
         } else if a == "--timeout" {
             guard idx + 1 < all_args.len else {
                 write_stdout("Error: --timeout requires a positive integer in seconds\n");
-                sys_exit(2);
-                return;
+                exit(2);
             }
             let t_val, ok = crap::parse_i64_slice(all_args[idx + 1]);
             guard ok && t_val > 0 else {
                 write_stdout("Error: --timeout must be a positive integer\n");
-                sys_exit(2);
-                return;
+                exit(2);
             }
             lit_cfg.timeout_sec = t_val;
             lit_cfg.has_timeout = true;
@@ -769,36 +741,31 @@ fn main() {
             write_stdout("Error: unknown option: ");
             write_stdout(a);
             write_stdout("\n");
-            sys_exit(2);
-            return;
+            exit(2);
         } else if cli_target.len == 0 {
             cli_target = a;
         } else {
             write_stdout("Error: unexpected positional argument: ");
             write_stdout(a);
             write_stdout("\n");
-            sys_exit(2);
-            return;
+            exit(2);
         }
         idx++;
     }
 
     if cli_target.len > 0 {
         let rc = run_lit_suite(cli_target, verbose, list_only, allow_empty, jobs, filter_glob, fail_fast, json_out, lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if lit_cfg.tests_dir_buf.len > 0 && (is_dir(lit_cfg.tests_dir_buf[..]) || file_exists(lit_cfg.tests_dir_buf[..])) {
         let rc = run_lit_suite(lit_cfg.tests_dir_buf[..], verbose, list_only, allow_empty, jobs, filter_glob, fail_fast, json_out, lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     if is_dir("tests") || file_exists("tests") {
         let rc = run_lit_suite("tests", verbose, list_only, allow_empty, jobs, filter_glob, fail_fast, json_out, lit_cfg);
-        sys_exit(rc);
-        return;
+        exit(rc);
     }
 
     print_usage();

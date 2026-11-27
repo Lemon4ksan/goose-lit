@@ -6,6 +6,6 @@
 c_sources_windows = ["shim/alloc_count.c", "shim/profiler.c"];
 c_sources_linux = ["shim/alloc_count.c", "shim/profiler.c"];
 c_sources_macos = ["shim/alloc_count.c", "shim/profiler.c"];
-c_flags_cc_windows = ["-mstackrealign", "-Wl,--stack,33554432"];
-c_flags_msvc = ["/std:c11", "/STACK:33554432"];
-exclude = ["scratch", "bin"];
+c_flags_cc_windows = ["-mstackrealign"];
+c_flags_msvc = ["/std:c11"];
+exclude = ["scratch", "bin", "sys", "check", "cov", "crap", "fuzz", "profile", "runner", "sloc", "tests", "examples"];
