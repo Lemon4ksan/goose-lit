@@ -78,6 +78,14 @@ goose build --cc gcc -O2 -o bin/goose-lit.exe bin.goose
 
 ## Quick start
 
+### Minimal setup (tests only)
+
+If you only want a test runner and assertions without configuring coverage, profiling, or static gates, three steps are enough:
+
+1. Install the `goose-lit` binary (above).
+2. Add a `.goose` test under `tests/` (either a plain `fn main()` test or `// RUN:` + `// CHECK:` directives).
+3. Run `goose-lit` from the project root.
+
 ### Running tests
 
 Run all tests in the project (reads `tests_dir` from `.litconfig` or scans `tests/`):
@@ -90,7 +98,7 @@ Or target a specific directory or file:
 
 ```bash
 goose-lit tests/
-goose-lit tests/ -j 4 --fail-fast
+goose-lit tests/ -j auto --fail-fast
 goose-lit tests/my_feature_test.goose
 ```
 
@@ -199,7 +207,7 @@ Run `goose-lit <subcommand> --help` for full per-subcommand flags.
 | Flag | Supported in | Description |
 | :--- | :--- | :--- |
 | `--config <file>` | all | Loads custom configuration file (default: `.litconfig`). |
-| `-j`, `--jobs <N>` | `<path>`, `check`, `cov` | Number of parallel worker threads. |
+| `-j`, `--jobs <N\|auto>` | `<path>`, `check`, `cov` | Parallel worker count (`auto` caps workers by CPU cores and available RAM). |
 | `--filter <glob>` | `<path>`, `check`, `cov`, `profile`, `sloc` | Filters targets or benchmark cases. |
 | `--fail-fast`, `-x` | `<path>`, `check` | Stops scheduling new work after the first failure. |
 | `--json` | `<path>` | Emits a structured JSON test summary. |
@@ -242,7 +250,9 @@ prefix = CHECK
 tests_dir = tests
 src_dir = src
 exclude = vendor/, scratch/
-jobs = 4
+cc = gcc
+cc_windows = tools/gcc_noavx.cmd
+jobs = auto
 timeout = 60
 include_tests = false
 ```
@@ -256,8 +266,10 @@ Configuration keys:
 - `tests_dir`: directory scanned when running tests without arguments.
 - `src_dir`: target directory for G-CRAP and coverage analysis.
 - `exclude`: comma-separated directory or path prefixes skipped during discovery.
-- `cc` / `goose_cc`: C compiler path passed to `GOOSE_CC`.
-- `jobs`: default parallel worker count.
+- `cc` / `goose_cc`: default C compiler path passed to `GOOSE_CC`.
+- `cc_windows`, `cc_linux`, `cc_macos` (or `goose_cc_*`): OS-specific compiler overrides that take precedence over `cc`.
+- `check_entries`: comma-separated package root `.goose` entry points used by `check` and `verify` when resolving internal submodules.
+- `jobs`: default parallel worker count (positive integer or `auto` for CPU/RAM-aware scheduling).
 - `timeout`: per-command timeout in seconds (default: `60`).
 - `include_tests`: include test files in complexity analysis (`true` or `false`).
 - `bce`: enable or disable automatic `goose --bce-lines` (`true` or `false`).
@@ -317,7 +329,7 @@ Inside `// RUN:` commands, goose-lit expands these substitutions:
 
 ## In-process test framework
 
-When writing unit tests, table-driven suites, or component tests, import `lit` directly. Assertions, mocks, deterministic clocks, allocation counters, profiler spans, and test runners reside in `lit::`:
+When writing unit tests, table-driven suites, or component tests, import `lit` directly. The root [`lit.goose`](lit.goose) facade exports only the lightweight test library (`testkit` and `wire`), without pulling in the CLI engines (`crap`, `sloc`, `cov`, `fuzz`, or `runner`). Assertions, mocks, deterministic clocks, allocation counters, profiler spans, and test runners reside in `lit::`:
 
 ```goose
 // tests/unit_test.goose

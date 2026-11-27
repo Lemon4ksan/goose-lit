@@ -56,8 +56,10 @@ Verification runs through four sequential stages:
 ```text
 goose-lit/
 ├── bin.goose                # CLI entry point (runner, check, cov, verify, filecheck, crap, profile, sloc, fuzz, inspect)
-├── lit.goose                # Root library interface
-├── lit.build                # Goose package sidecar build configuration
+├── cli.goose                # CLI subsystem facade (re-exports lit + CLI engines)
+├── cli.build                # CLI package sidecar build configuration (proc.c, alloc_count.c, profiler.c)
+├── lit.goose                # Lightweight library facade (testkit + wire only, zero CLI dependencies)
+├── lit.build                # Library package sidecar build configuration (alloc_count.c, profiler.c)
 ├── check/
 │   └── filecheck.goose      # FileCheck directive parser and matcher
 ├── cov/

@@ -24,8 +24,10 @@ This document covers engineering invariants, repository layout, and testing work
 ```text
 goose-lit/
 ├── bin.goose         # CLI entry point
-├── lit.goose         # Root library exports
-├── lit.build         # Package sidecar C shim build configuration
+├── cli.goose         # CLI subsystem facade (runner, check, cov, crap, profile, fuzz, sloc)
+├── cli.build         # CLI sidecar C shim build configuration
+├── lit.goose         # Lightweight library exports (testkit + wire only)
+├── lit.build         # Library sidecar C shim build configuration
 ├── check/            # FileCheck directive parser and matcher
 ├── cov/              # Source-to-source branch coverage collector and LCOV exporter
 ├── crap/             # G-CRAP lexer, AST analyzer, compiler bridge, metrics, reports, ratchet
