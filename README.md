@@ -7,6 +7,8 @@ Language](https://img.shields.io/badge/lang-goose-blue.svg?style=flat-square)](h
 [![Release](https://img.shields.io/github/v/release/Lemon4ksan/goose-lit?style=flat-square)](https://github.com/Lemon4ksan/goose-lit/releases)
 [![Platform: Linux
 x64](https://img.shields.io/badge/platform-Linux%20x64-blue.svg?style=flat-square)](https://github.com/Lemon4ksan/goose-lit/releases)
+[![Platform: macOS
+arm64](https://img.shields.io/badge/platform-macOS%20arm64-blue.svg?style=flat-square)](https://github.com/Lemon4ksan/goose-lit/releases)
 [![Platform: Windows
 x64](https://img.shields.io/badge/platform-Windows%20x64-blue.svg?style=flat-square)](https://github.com/Lemon4ksan/goose-lit/releases)
 
@@ -59,16 +61,25 @@ Components:
 
 ### Prebuilt release binaries
 
-Prebuilt standalone binaries for Linux (`x86_64`) and Windows (`x86_64`) ship on
-each GitHub Release. The binary embeds runtime shims (`alloc_hook.h`,
-`prof_hook.h`, `cov_rt.h`, `fuzz_driver.c`) and unpacks them into
-`.lit/cache/shim/` on demand when no sibling `shim/` directory exists.
+Prebuilt standalone binaries for Linux (`x86_64`), macOS (`arm64`), and Windows
+(`x86_64`) ship on each GitHub Release with `SHA256SUMS.txt`. The binary embeds
+runtime shims (`alloc_hook.h`, `prof_hook.h`, `cov_rt.h`, `fuzz_driver.c`) and
+unpacks them into `.lit/cache/shim/` on demand when no sibling `shim/` directory
+exists.
 
 #### Linux (`x86_64`)
 
 ```bash
 LATEST_TAG=$(curl -s https://api.github.com/repos/Lemon4ksan/goose-lit/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 curl -sSL "https://github.com/Lemon4ksan/goose-lit/releases/download/${LATEST_TAG}/goose-lit-${LATEST_TAG}-linux-x64.tar.gz" | sudo tar -xz -C /usr/local/bin
+sudo chmod +x /usr/local/bin/goose-lit
+```
+
+#### macOS (`arm64`)
+
+```bash
+LATEST_TAG=$(curl -s https://api.github.com/repos/Lemon4ksan/goose-lit/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+curl -sSL "https://github.com/Lemon4ksan/goose-lit/releases/download/${LATEST_TAG}/goose-lit-${LATEST_TAG}-macos-arm64.tar.gz" | sudo tar -xz -C /usr/local/bin
 sudo chmod +x /usr/local/bin/goose-lit
 ```
 
@@ -93,8 +104,17 @@ if ($userPath -notlike "*$installDir*") {
 
 ### Compiling from source
 
-Requirements: Goose compiler `v2026.4` or later and a C11 compiler (GCC or
-Clang).
+Tested with Goose `v2026.4` on Linux `x86_64`, macOS `arm64`, and Windows
+`x86_64`.
+
+Native prerequisites and limits:
+
+- `lit.build` compiles C11 shims (`shim/alloc_count.c`, `shim/profiler.c`), and
+  `cli.build` adds `shim/proc.c`. Both require GCC or Clang.
+- `goose-lit fuzz` requires GCC or Clang with `-fsanitize-coverage=trace-pc`.
+  Passing `--libfuzzer` requires Clang with libFuzzer.
+- `v0.1.x` is pre-1.0. Public `lit::` signatures and CLI flags may change before
+  `1.0.0`.
 
 ```bash
 git clone https://github.com/Lemon4ksan/goose-lit.git
@@ -104,7 +124,7 @@ cd goose-lit
 just build
 
 # Or compile with Goose directly
-# Linux:
+# Linux / macOS:
 goose build -O2 -o bin/goose-lit bin.goose
 
 # Windows:

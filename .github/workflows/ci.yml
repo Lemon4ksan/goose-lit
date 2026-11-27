@@ -67,7 +67,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
@@ -102,6 +102,16 @@ jobs:
           fi
           sudo ln -sf /opt/goose-v2026.4-linux-x64/goose /usr/local/bin/goose
 
+      - name: Bootstrap Goose compiler (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          GOOSE_DIR="$HOME/.goose/goose-v2026.4-macos-arm64"
+          if [ ! -f "$GOOSE_DIR/goose" ]; then
+            mkdir -p "$HOME/.goose"
+            curl -sSL --retry 5 --retry-delay 2 --retry-connrefused https://github.com/aardappel/goose/releases/download/v2026.4/goose-v2026.4-macos-arm64.tar.gz | tar -xz -C "$HOME/.goose"
+          fi
+          echo "$GOOSE_DIR" >> "$GITHUB_PATH"
+
       - name: Bootstrap Goose compiler (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -128,8 +138,8 @@ jobs:
         run: |
           python tools/test_runner.py
 
-      - name: Verify example project (Linux)
-        if: runner.os == 'Linux'
+      - name: Verify example project (POSIX)
+        if: runner.os != 'Windows'
         run: |
           ./bin/goose-lit examples/basic_project/tests
 

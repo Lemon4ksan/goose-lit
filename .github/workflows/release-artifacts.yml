@@ -31,6 +31,8 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact-name: release-linux
+          - os: macos-latest
+            artifact-name: release-macos
           - os: windows-latest
             artifact-name: release-windows
 
@@ -63,6 +65,16 @@ jobs:
             curl -sSL --retry 5 --retry-delay 2 --retry-connrefused https://github.com/aardappel/goose/releases/download/v2026.4/goose-v2026.4-linux-x64.tar.gz | sudo tar -xz -C /opt
           fi
           sudo ln -sf /opt/goose-v2026.4-linux-x64/goose /usr/local/bin/goose
+
+      - name: Bootstrap Goose compiler (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          GOOSE_DIR="$HOME/.goose/goose-v2026.4-macos-arm64"
+          if [ ! -f "$GOOSE_DIR/goose" ]; then
+            mkdir -p "$HOME/.goose"
+            curl -sSL --retry 5 --retry-delay 2 --retry-connrefused https://github.com/aardappel/goose/releases/download/v2026.4/goose-v2026.4-macos-arm64.tar.gz | tar -xz -C "$HOME/.goose"
+          fi
+          echo "$GOOSE_DIR" >> "$GITHUB_PATH"
 
       - name: Bootstrap Goose compiler (Windows)
         if: runner.os == 'Windows'
@@ -101,6 +113,17 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           tar -czvf "goose-lit-${TAG_NAME}-linux-x64.tar.gz" -C bin goose-lit
+
+      - name: Build binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p bin
+          goose build -O2 -o bin/goose-lit bin.goose
+
+      - name: Archive binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          tar -czvf "goose-lit-${TAG_NAME}-macos-arm64.tar.gz" -C bin goose-lit
 
       - name: Build binary (Windows)
         if: runner.os == 'Windows'
