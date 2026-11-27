@@ -576,8 +576,10 @@ static int crap_posix_remove_tree(const char *cpath) {
         while ((ent = readdir(d)) != NULL) {
             if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
             char child[4096];
-            snprintf(child, sizeof(child), "%s/%s", cpath, ent->d_name);
-            crap_posix_remove_tree(child);
+            int written = snprintf(child, sizeof(child), "%s/%s", cpath, ent->d_name);
+            if (written > 0 && (size_t)written < sizeof(child)) {
+                crap_posix_remove_tree(child);
+            }
         }
         closedir(d);
     }
@@ -753,8 +755,10 @@ GCRAP_WEAK int32_t crap_exec_in_dir_with_env(crap_bytes_ro dir, crap_bytes_ro cm
     if (c_key[0] && c_val[0] && c_val[0] != '/' && (strchr(c_val, '/') != NULL)) {
         char cwd[4096];
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
-            snprintf(abs_val, sizeof(abs_val), "%s/%s", cwd, c_val);
-            eff_val = abs_val;
+            int written = snprintf(abs_val, sizeof(abs_val), "%s/%s", cwd, c_val);
+            if (written > 0 && (size_t)written < sizeof(abs_val)) {
+                eff_val = abs_val;
+            }
         }
     }
     int out_fd = open(c_out, O_WRONLY | O_CREAT | O_TRUNC, 0644);

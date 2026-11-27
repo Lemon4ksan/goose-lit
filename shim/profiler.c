@@ -5,6 +5,10 @@
 // Hardware Cycle-Accurate Stage Profiler, Three-Channel Memory Auditor &
 // testing.B Benchmark Engine for goose-lit.
 
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
