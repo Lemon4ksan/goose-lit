@@ -80,9 +80,7 @@ fn extract_tsv_col(line: const u8[:], col_idx: i64) -> const u8[:] {
 
 fn is_machine_tsv_line(line: const u8[:]) -> bool {
     return crap::slice_starts_with(line, "@LIT_BENCH\t") ||
-        crap::slice_starts_with(line, "@LIT_STAGE\t") ||
-        crap::slice_starts_with(line, "@WING_BENCH\t") ||
-        crap::slice_starts_with(line, "@WING_STAGE\t");
+        crap::slice_starts_with(line, "@LIT_STAGE\t");
 }
 
 fn parse_tsv_rows(raw: const u8[:], rows: ProfileRow[>..]&) {
@@ -94,14 +92,14 @@ fn parse_tsv_rows(raw: const u8[:], rows: ProfileRow[>..]&) {
         let line = crap::trim_ascii(raw[start..end]);
         start = i + 1;
 
-        if crap::slice_starts_with(line, "@LIT_BENCH\t") || crap::slice_starts_with(line, "@WING_BENCH\t") {
+        if crap::slice_starts_with(line, "@LIT_BENCH\t") {
             var r = ProfileRow { kind: 1, .. };
             let _ = crap::set_bounded(r.case_name, extract_tsv_col(line, 2));
             r.cycles_x10 = parse_decimal_x10(extract_tsv_col(line, 5));
             let sb, _ = crap::parse_i64_slice(extract_tsv_col(line, 8));
             r.scratch_b = sb;
             rows.push(r);
-        } else if crap::slice_starts_with(line, "@LIT_STAGE\t") || crap::slice_starts_with(line, "@WING_STAGE\t") {
+        } else if crap::slice_starts_with(line, "@LIT_STAGE\t") {
             var r = ProfileRow { kind: 2, .. };
             let _ = crap::set_bounded(r.case_name, extract_tsv_col(line, 1));
             let _ = crap::set_bounded(r.stage_name, extract_tsv_col(line, 2));
@@ -235,7 +233,7 @@ fn export_profile_json(tsv_raw: const u8[:], json_path: const u8[:]) -> bool {
         let end = if rel_nl >= 0 { start + rel_nl } else { tsv_raw.len };
         let line = crap::trim_ascii(tsv_raw[start..end]);
         start = end + 1;
-        if crap::slice_starts_with(line, "@LIT_BENCH\t") || crap::slice_starts_with(line, "@WING_BENCH\t") {
+        if crap::slice_starts_with(line, "@LIT_BENCH\t") {
             if !first_case { out.append(",\n"); }
             first_case = false;
             out.append("    {\"suite\": \"");
@@ -277,7 +275,7 @@ fn export_profile_markdown(tsv_raw: const u8[:], md_path: const u8[:]) -> bool {
         let end = if rel_nl >= 0 { start + rel_nl } else { tsv_raw.len };
         let line = crap::trim_ascii(tsv_raw[start..end]);
         start = end + 1;
-        if crap::slice_starts_with(line, "@LIT_BENCH\t") || crap::slice_starts_with(line, "@WING_BENCH\t") {
+        if crap::slice_starts_with(line, "@LIT_BENCH\t") {
             out.append("| `");
             out.append(extract_tsv_col(line, 2));
             out.append("` | ");
@@ -324,10 +322,12 @@ fn handle_profile_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig
 
     crap::ensure_lit_cache_dir();
     var exe_out: u8[>..] = [];
-    exe_out.append(".lit/cache/lit_profile_bench");
+    exe_out.append(".lit/cache/lit_profile_bench_");
+    format(exe_out, clock_ns() as u64, "_", crap::native_next_seq());
     if crap::native_host_os() == 1 {
         exe_out.append(".exe");
     }
+    defer if file_exists(exe_out[..]) { delete_file(exe_out[..]); };
 
     var prog: u8[>..] = [];
     arg(0, prog);

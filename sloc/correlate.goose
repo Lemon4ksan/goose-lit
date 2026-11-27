@@ -131,7 +131,7 @@ fn parse_profile_tsv_samples(raw: const u8[:], samples: ProfileSample[>..]&) -> 
         let line = crap::trim_ascii(raw[start..end]);
         start = end + 1;
 
-        if crap::slice_starts_with(line, "@LIT_BENCH\t") || crap::slice_starts_with(line, "@WING_BENCH\t") {
+        if crap::slice_starts_with(line, "@LIT_BENCH\t") {
             var s = ProfileSample { kind: SLOC_SCOPE_BENCH, .. };
             let _ = crap::set_bounded(s.case_name, extract_tsv_col(line, 2));
             let iters, _ = crap::parse_i64_slice(extract_tsv_col(line, 3));
@@ -141,7 +141,7 @@ fn parse_profile_tsv_samples(raw: const u8[:], samples: ProfileSample[>..]&) -> 
             s.scratch_b = sb;
             samples.push(s);
             added += 1;
-        } else if crap::slice_starts_with(line, "@LIT_STAGE\t") || crap::slice_starts_with(line, "@WING_STAGE\t") {
+        } else if crap::slice_starts_with(line, "@LIT_STAGE\t") {
             var s = ProfileSample { kind: SLOC_SCOPE_STAGE, .. };
             let _ = crap::set_bounded(s.case_name, extract_tsv_col(line, 1));
             let _ = crap::set_bounded(s.stage_name, extract_tsv_col(line, 2));

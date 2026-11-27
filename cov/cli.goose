@@ -184,8 +184,7 @@ fn cov_collect_tests(
         lstart = end + 1;
         guard fpath.len > 0 else { continue; }
         guard crap::slice_ends_with(fpath, ".goose") else { continue; }
-        guard !crap::slice_ends_with(fpath, "wire_kit.goose") else { continue; }
-        guard !crap::slice_ends_with(fpath, "wasm_runner.goose") else { continue; }
+        guard !crap::is_excluded_path(fpath, exclude_blob) else { continue; }
 
         if filter_glob.len > 0 {
             let last_sl = crap::slice_last_index_of_byte(fpath, '/');
@@ -339,8 +338,12 @@ fn parse_cov_cli_args(all_args: const (u8[:])[:], cfg: CovCliArgs&) -> bool {
             cfg.test_targets.push('\n');
         } else if (a == "-j" || a == "--jobs") && idx + 1 < all_args.len {
             idx++;
-            let jv, ok = crap::parse_i64_slice(all_args[idx]);
-            if ok && jv > 0 { cfg.jobs = jv; }
+            if all_args[idx] == "auto" {
+                cfg.jobs = 0;
+            } else {
+                let jv, ok = crap::parse_i64_slice(all_args[idx]);
+                if ok && jv > 0 { cfg.jobs = jv; }
+            }
         } else if a == "--filter" && idx + 1 < all_args.len {
             idx++;
             cfg.filter = all_args[idx];
@@ -530,7 +533,7 @@ fn handle_cov_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) -
     let eff_jobs = if cfg.jobs > 0 {
         cfg.jobs
     } else {
-        min(max(crap::native_cpu_count() as i64, 1), 4)
+        crap::default_auto_jobs(1536)
     };
     let n_workers = min(eff_jobs, total_tests);
 
