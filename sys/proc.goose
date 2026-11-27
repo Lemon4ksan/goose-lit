@@ -30,6 +30,7 @@ extern fn native_setenv(key: const u8[:], val: const u8[:]) -> i32 = "crap_seten
 extern fn native_host_os() -> i32 = "crap_host_os";
 extern fn native_host_arch() -> i32 = "crap_host_arch";
 extern fn native_cpu_count() -> i32 = "crap_cpu_count";
+extern fn native_avail_mem_mb() -> i64 = "crap_avail_mem_mb";
 extern fn native_next_seq() -> u64 = "crap_next_seq";
 extern fn native_work_reset() = "crap_work_reset";
 extern fn native_work_claim(total: i32) -> i32 = "crap_work_claim";
@@ -58,6 +59,16 @@ extern fn native_exec_argv_nul_to_file(
     out_path:   const u8[:],
     timeout_ms: i32,
 ) -> i32 = "crap_exec_argv_nul_to_file";
+
+fn default_auto_jobs(mem_per_job_mb: i64) -> i64 {
+    let cpu_cap = min(max(native_cpu_count() as i64, 1), 4);
+    let avail_mb = native_avail_mem_mb();
+    if avail_mb > 0 && mem_per_job_mb > 0 {
+        let mem_cap = max(1, (avail_mb - 1536) / mem_per_job_mb);
+        return max(1, min(cpu_cap, mem_cap));
+    }
+    return cpu_cap;
+}
 
 fn resolve_abs_path(path: const u8[:], out: u8[>..]&) -> bool {
     guard path.len > 0 else { return false; }

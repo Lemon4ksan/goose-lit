@@ -670,6 +670,39 @@ GCRAP_WEAK int32_t crap_cpu_count(void) {
 #endif
 }
 
+GCRAP_WEAK int64_t crap_avail_mem_mb(void) {
+#if defined(_WIN32)
+    MEMORYSTATUSEX st;
+    memset(&st, 0, sizeof(st));
+    st.dwLength = (DWORD)sizeof(st);
+    if (!GlobalMemoryStatusEx(&st)) return 0;
+    return (int64_t)(st.ullAvailPageFile / (1024ULL * 1024ULL));
+#elif defined(__linux__)
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+    char line[256];
+    int64_t mb = 0;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        if (strncmp(line, "MemAvailable:", 13) == 0) {
+            unsigned long long kb = 0;
+            if (sscanf(line + 13, "%llu", &kb) == 1) {
+                mb = (int64_t)(kb / 1024ULL);
+            }
+            break;
+        }
+    }
+    fclose(f);
+    return mb;
+#elif defined(__APPLE__)
+    long pages = sysconf(_SC_PHYS_PAGES);
+    long page_sz = sysconf(_SC_PAGESIZE);
+    if (pages <= 0 || page_sz <= 0) return 0;
+    return (int64_t)(((uint64_t)pages * (uint64_t)page_sz) / (1024ULL * 1024ULL));
+#else
+    return 0;
+#endif
+}
+
 GCRAP_WEAK int64_t crap_file_mtime(crap_bytes_ro path) {
     char cpath[4096];
     crap_slice_to_cstr(path, cpath, sizeof(cpath));

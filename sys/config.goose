@@ -29,6 +29,7 @@ struct LitConfig {
     sloc_map_buf:         u8[..256]  = [],
     sloc_exclude_buf:     u8[..1024] = [],
     sloc_bce_entries_buf: u8[..512]  = [],
+    check_entries_buf:    u8[..512]  = [],
     gate_ceiling:         f64        = 25.0,
     has_gate_ceiling:     bool       = false,
     delta_threshold:      f64        = 5.0,
@@ -42,7 +43,9 @@ struct LitConfig {
     timeout_sec:          i64        = 60,
     has_timeout:          bool       = false,
     jobs:                 i64        = 0,
+    jobs_auto:            bool       = false,
     has_jobs:             bool       = false,
+    cc_os_specific:       bool       = false,
     include_tests:        bool       = false,
     has_include_tests:    bool       = false,
     bce_enabled:          bool       = true,
@@ -163,6 +166,19 @@ fn is_excluded_path(path: const u8[:], exclude_blob: const u8[:]) -> bool {
     return false;
 }
 
+fn copy_newline_list_512(src: const u8[:], dst: u8[..512]&) {
+    dst.clear();
+    var start: i64 = 0;
+    while start < src.len {
+        let rel = slice_index_of_byte(src[start..], '\n');
+        let end = if rel >= 0 { start + rel + 1 } else { src.len };
+        let seg = src[start..end];
+        start = end;
+        guard dst.len + seg.len <= dst.cap else { break; }
+        dst.append(seg);
+    }
+}
+
 fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bool {
     if key == "baseline" {
         set_bounded(cfg.baseline_buf, val);
@@ -188,8 +204,23 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
         set_bounded(cfg.test_exec_buf, val);
         return true;
     }
+    let host_os = native_host_os();
     if key == "goose_cc" || key == "cc" {
-        if set_bounded(cfg.cc_buf, val) {
+        if !cfg.cc_os_specific && set_bounded(cfg.cc_buf, val) {
+            set_bounded(cfg.cc_source_buf, "config");
+            native_setenv("GOOSE_CC", val);
+        }
+        return true;
+    }
+    let is_cc_win = key == "cc_windows" || key == "goose_cc_windows";
+    let is_cc_lin = key == "cc_linux" || key == "goose_cc_linux";
+    let is_cc_mac = key == "cc_macos" || key == "goose_cc_macos";
+    if is_cc_win || is_cc_lin || is_cc_mac {
+        let matches_os = (host_os == 1 && is_cc_win) ||
+            (host_os == 2 && is_cc_lin) ||
+            (host_os == 3 && is_cc_mac);
+        if matches_os && set_bounded(cfg.cc_buf, val) {
+            cfg.cc_os_specific = true;
             set_bounded(cfg.cc_source_buf, "config");
             native_setenv("GOOSE_CC", val);
         }
@@ -227,19 +258,15 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
     if key == "sloc_bce_entries" {
         var tmp_entries: u8[..1024] = [];
         append_exclude_patterns(val, tmp_entries);
-        cfg.sloc_bce_entries_buf.clear();
-        var start: i64 = 0;
-        while start < tmp_entries.len {
-            let rel = slice_index_of_byte(tmp_entries[start..], '\n');
-            let end = if rel >= 0 { start + rel + 1 } else { tmp_entries.len };
-            let seg = tmp_entries[start..end];
-            start = end;
-            guard cfg.sloc_bce_entries_buf.len + seg.len <= cfg.sloc_bce_entries_buf.cap else { break; }
-            cfg.sloc_bce_entries_buf.append(seg);
-        }
+        copy_newline_list_512(tmp_entries[..], cfg.sloc_bce_entries_buf);
         return true;
     }
-    let host_os = native_host_os();
+    if key == "check_entries" {
+        var tmp_entries: u8[..1024] = [];
+        append_exclude_patterns(val, tmp_entries);
+        copy_newline_list_512(tmp_entries[..], cfg.check_entries_buf);
+        return true;
+    }
     let is_os_libs = key == "fuzz_extra_libs" ||
         (host_os == 1 && key == "fuzz_extra_libs_windows") ||
         (host_os == 2 && key == "fuzz_extra_libs_linux") ||
@@ -298,9 +325,16 @@ fn apply_numeric_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) ->
         return true;
     }
     if key == "jobs" {
+        if val == "auto" {
+            cfg.jobs = 0;
+            cfg.jobs_auto = true;
+            cfg.has_jobs = true;
+            return true;
+        }
         let ival, ok = parse_i64_slice(val);
         if ok && ival > 0 {
             cfg.jobs = ival;
+            cfg.jobs_auto = false;
             cfg.has_jobs = true;
         }
         return true;
