@@ -530,9 +530,17 @@ fn collect_calls_in_tokens(src: const u8[:], tokens: const crap::Token[:], raw_h
     for i in tokens.len {
         guard tokens[i].kind == crap::TOK_IDENT else { continue; }
         let prev_kind = if i > 0 { tokens[i - 1].kind } else { crap::TOK_EOF };
-        // Exclude function declarations (`fn foo`)
+        // Exclude function declarations (`fn foo`, `fn ::foo`, `fn ns::foo`)
         if prev_kind == crap::TOK_FN {
             continue;
+        }
+        if prev_kind == crap::TOK_COLONCOLON {
+            if i >= 2 && tokens[i - 2].kind == crap::TOK_FN {
+                continue;
+            }
+            if i >= 3 && tokens[i - 3].kind == crap::TOK_FN {
+                continue;
+            }
         }
         let next_kind = if i + 1 < tokens.len { tokens[i + 1].kind } else { crap::TOK_EOF };
         let is_call = next_kind == crap::TOK_LPAREN ||
@@ -593,6 +601,7 @@ fn collect_repo_dead_fns(
     }
 
     // 2. Check every shipping function declaration against called_set
+    var norm_path: u8[>..] = [];
     start = 0;
     while start < shipping_paths_blob.len {
         let rel_nl = crap::slice_index_of_byte(shipping_paths_blob[start..], '\n');
@@ -606,7 +615,7 @@ fn collect_repo_dead_fns(
         pragmas.clear();
         crap::tokenize_goose(src_buf[..], tokens, pragmas);
 
-        var norm_path: u8[>..] = [];
+        norm_path.clear();
         crap::normalize_slashes(fpath, norm_path);
         var fp: const u8[:] = norm_path[..];
         while crap::slice_starts_with(fp, "./") {
@@ -616,7 +625,6 @@ fn collect_repo_dead_fns(
 
         for i in tokens.len {
             guard tokens[i].kind == crap::TOK_FN && i + 1 < tokens.len else { continue; }
-            guard tokens[i + 1].kind == crap::TOK_IDENT else { continue; }
             let prev_kind = if i > 0 { tokens[i - 1].kind } else { crap::TOK_EOF };
             guard prev_kind != crap::TOK_EXTERN && prev_kind != crap::TOK_COLON && prev_kind != crap::TOK_ARROW else {
                 continue;
@@ -624,7 +632,16 @@ fn collect_repo_dead_fns(
             if prev_kind == crap::TOK_IDENT && sloc_token_text(src_buf[..], tokens[i - 1]) == "export" {
                 continue;
             }
-            let fname = sloc_token_text(src_buf[..], tokens[i + 1]);
+            var name_idx = i + 1;
+            if tokens[name_idx].kind == crap::TOK_COLONCOLON && name_idx + 1 < tokens.len {
+                name_idx += 1;
+            } else if tokens[name_idx].kind == crap::TOK_IDENT &&
+                      name_idx + 2 < tokens.len &&
+                      tokens[name_idx + 1].kind == crap::TOK_COLONCOLON {
+                name_idx += 2;
+            }
+            guard tokens[name_idx].kind == crap::TOK_IDENT else { continue; }
+            let fname = sloc_token_text(src_buf[..], tokens[name_idx]);
             guard fname.len > 0 && fname != "main" && !crap::slice_starts_with(fname, "test_") else {
                 continue;
             }
