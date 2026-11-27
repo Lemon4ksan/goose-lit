@@ -9,6 +9,7 @@ import os;
 import sys.bytes;
 import sys.proc;
 import sys.config;
+import runner.check_cli;
 
 struct VerifyCliArgs {
     target:      const u8[:] = "",
@@ -85,15 +86,27 @@ fn handle_verify_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&
     }
     write_stdout("  [OK] Formatting check passed.\n");
 
-    // 2. goose check
+    // 2. goose check (with package entry-point fallback for internal submodules)
     write_stdout("[2/4] Typechecking target...\n");
     out.clear();
-    if crap::exec_argv_capture("goose", "check", cfg.target, "", 0, out) != 0 {
+    let cfg_entries: const u8[:] = if lit_cfg.check_entries_buf.len > 0 {
+        lit_cfg.check_entries_buf[..]
+    } else {
+        lit_cfg.sloc_bce_entries_buf[..]
+    };
+    var used_entry: u8[>..] = [];
+    if typecheck_file_with_fallback(cfg.target, lit_cfg.cc_buf[..], cfg_entries, used_entry, out) != 0 {
         write_stdout("  [FAIL] Typecheck failed:\n");
         write_stdout(out[..]);
         return 1;
     }
-    write_stdout("  [OK] Typecheck passed.\n");
+    if used_entry.len > 0 {
+        write_stdout("  [OK] Typecheck passed via package entry (");
+        write_stdout(used_entry[..]);
+        write_stdout(").\n");
+    } else {
+        write_stdout("  [OK] Typecheck passed.\n");
+    }
 
     // 3. goose-lit gate
     write_stdout("[3/4] Running G-CRAP complexity & BCE gate...\n");
