@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/Lemon4ksan/goose-lit/compare/v0.1.0...v0.1.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **ci:** add macOS arm64 CI, release binaries, and platform prerequisites ([34e5272](https://github.com/Lemon4ksan/goose-lit/commit/34e52721604e052d809e01c75beeb25392150f3f))
+
 ## 0.1.0 (2026-11-27)
 
 
