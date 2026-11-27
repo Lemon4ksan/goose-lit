@@ -226,8 +226,24 @@ fn cleanup_scratch_variants(base: const u8[:]) {
     }
 }
 
-// Resolves a shim asset (`alloc_hook.h`, `prof_hook.h`, `fuzz_driver.c`)
-// relative to the running `goose-lit` executable directory or its parent.
+const EMBED_ALLOC_HOOK:  const u8[:] = embed_file("../shim/alloc_hook.h");
+const EMBED_PROF_HOOK:   const u8[:] = embed_file("../shim/prof_hook.h");
+const EMBED_COV_RT:      const u8[:] = embed_file("../shim/cov_rt.h");
+const EMBED_FUZZ_DRIVER: const u8[:] = embed_file("../shim/fuzz_driver.c");
+
+fn embedded_shim_bytes(shim_file: const u8[:]) -> const u8[:] {
+    if shim_file == "alloc_hook.h" { return EMBED_ALLOC_HOOK; }
+    if shim_file == "prof_hook.h" { return EMBED_PROF_HOOK; }
+    if shim_file == "cov_rt.h" { return EMBED_COV_RT; }
+    if shim_file == "fuzz_driver.c" { return EMBED_FUZZ_DRIVER; }
+    return "";
+}
+
+// Resolves a shim asset (`alloc_hook.h`, `prof_hook.h`, `cov_rt.h`, `fuzz_driver.c`)
+// relative to the running `goose-lit` executable directory, its parent, or the
+// workspace `shim/` directory. When running from a standalone prebuilt binary
+// without a sibling `shim/` tree, materializes the embedded asset into
+// `.lit/cache/shim/<shim_file>`.
 fn resolve_lit_shim_path(prog: const u8[:], shim_file: const u8[:], out: u8[>..]&) {
     let os_id = crap::native_host_os();
     let sep: u8 = if os_id == 1 { '\\' } else { '/' };
@@ -279,10 +295,40 @@ fn resolve_lit_shim_path(prog: const u8[:], shim_file: const u8[:], out: u8[>..]
         }
     }
 
-    // 3. Fallback to workspace-local shim/<shim_file>
-    out.append("shim");
-    out.push(sep);
-    out.append(shim_file);
+    // 3. Check workspace-local shim/<shim_file>
+    var local_cand: u8[>..] = [];
+    local_cand.append("shim");
+    local_cand.push(sep);
+    local_cand.append(shim_file);
+    if file_exists(local_cand[..]) {
+        out.append(local_cand[..]);
+        return;
+    }
+
+    // 4. Materialize embedded shim asset into .lit/cache/shim/<shim_file>
+    let embedded = embedded_shim_bytes(shim_file);
+    if embedded.len > 0 {
+        crap::ensure_lit_cache_dir();
+        if !is_dir(".lit/cache/shim") {
+            let _ = make_dir(".lit/cache/shim");
+        }
+        var cached: u8[>..] = [];
+        cached.append(".lit");
+        cached.push(sep);
+        cached.append("cache");
+        cached.push(sep);
+        cached.append("shim");
+        cached.push(sep);
+        cached.append(shim_file);
+        var existing: u8[>..] = [];
+        let matches = read_file(cached[..], existing) && existing[..] == embedded;
+        if matches || write_file(cached[..], embedded) {
+            out.append(cached[..]);
+            return;
+        }
+    }
+
+    out.append(local_cand[..]);
 }
 
 // Expands lit substitutions in a command line:
