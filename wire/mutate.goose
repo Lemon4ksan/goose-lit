@@ -5,7 +5,7 @@
 namespace lit;
 
 import std;
-import sys.bytes;
+import wire.inspect;
 
 // Fast deterministic 64-bit pseudo-random number generator
 fn xorshift64_step(state: u64&) -> u64 {
@@ -108,13 +108,12 @@ fn fuzz_payload_stream<F: fn(const u8[:]) -> bool>(
     var rng:     u64     = 0x9E3779B97F4A7C15;
     var mut_buf: u8[>..] = [];
 
-    var it: i64 = 0;
-    while it < runs {
+    for it in runs {
         mut_buf.clear();
         mut_buf.append(seed);
 
         // Apply 1 to 3 mutations
-        let mut_count = 1 + (xorshift64_step(rng) % 3);
+        let mut_count = 1 + ((xorshift64_step(rng) % 3) as! i64);
         for _ in mut_count {
             mutate_payload_once(mut_buf, rng);
         }
@@ -125,15 +124,12 @@ fn fuzz_payload_stream<F: fn(const u8[:]) -> bool>(
             format(out_diag, it + 1, "/", runs, "\n");
             out_diag.append("  Mutated payload hex: ");
             for b in mut_buf {
-                let hex_chars = "0123456789ABCDEF";
-                out_diag.push(hex_chars[((b >> 4) & 0xF) as! i64]);
-                out_diag.push(hex_chars[(b & 0xF) as! i64]);
+                out_diag.push(lit_internal::hex_nibble(b >> 4));
+                out_diag.push(lit_internal::hex_nibble(b));
             }
             out_diag.append("\n");
             return false;
         }
-
-        it += 1;
     }
 
     out_diag.append("MUTATE_FUZZ PASSED: ");

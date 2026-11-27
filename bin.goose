@@ -168,9 +168,9 @@ thread_fn lit_parallel_worker(cfg: LitWorkerCfg) {
     var list_blob: u8[>..] = [];
     guard read_file(cfg.list_path[..], list_blob) else { return; }
 
-    var fpath:     u8[>..] = [];
-    var slot_path: u8[>..] = [];
-    var slot_buf:  u8[>..] = [];
+    var fpath:     u8[>..]  = [];
+    var slot_path: u8[..64] = [];
+    var slot_buf:  u8[>..]  = [];
 
     while true {
         if cfg.fail_fast && crap::native_atomic_get_stop() != 0 {
@@ -245,7 +245,7 @@ fn run_lit_suite(
         let _ = lit::run_single_lit_test_with_timeout(target_path, verbose, lit_cfg.timeout_sec, res);
         let sc = lit_status_code(res.status);
         if json_out {
-            var jb: u8[>..] = [];
+            var jb: u8[..256] = [];
             jb.append("{\"passed\": ");
             format(jb, if sc == 0 { 1 } else { 0 }, ", \"failed\": ");
             format(jb, if sc == 1 || sc == 3 || sc == 5 { 1 } else { 0 }, ", \"xfailed\": ");

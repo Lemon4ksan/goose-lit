@@ -372,7 +372,7 @@ fn analyze_goose_file_with_calls(
             var is_untrusted = false;
             var is_trusted = false;
             var is_ignored = false;
-            for p in pragmas {
+            for &p in pragmas {
                 if p.line >= fn_start_line - 3 && p.line <= fn_start_line + 1 {
                     if p.kind == PRAGMA_CRAP_UNTRUSTED { is_untrusted = true; }
                     if p.kind == PRAGMA_CRAP_TRUSTED { is_trusted = true; }
@@ -1038,7 +1038,7 @@ fn analyze_goose_file_with_calls(
             let total_fn_branches = (branches.len as i32) - first_branch_idx;
 
             // Map trusted-bounds audit pragmas to enclosing branch sites
-            for p in pragmas {
+            for &p in pragmas {
                 if p.kind == PRAGMA_CRAP_TRUSTED_BOUNDS && p.line >= fn_start_line && p.line <= fn_end_line {
                     for bi in total_fn_branches {
                         let b_idx: i64 = first_branch_idx + bi;

@@ -6,7 +6,6 @@
 namespace lit;
 
 import std;
-import sys.bytes;
 
 // Evaluates whether a contained worker exited cleanly without traps or aborts.
 // Returns true if clean, or false with the exact abort message in out_diag.
@@ -31,7 +30,7 @@ fn expect_contained_abort(worker_id: i64, expected_substr: const u8[:], out_diag
         return false;
     }
 
-    if expected_substr.len > 0 && !crap::slice_contains(why[..], expected_substr) {
+    if expected_substr.len > 0 && find(why[..], expected_substr) < 0 {
         out_diag.append("EXPECT_ABORT FAILED: aborted with '");
         out_diag.append(why[..]);
         out_diag.append("', but expected substring '");

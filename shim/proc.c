@@ -115,24 +115,6 @@ GCRAP_WEAK void crap_cov_hit(int32_t id) {
     }
 }
 
-// Resets all in-memory branch counters to zero.
-GCRAP_WEAK void crap_cov_reset(void) { memset(g_crap_hits, 0, sizeof(g_crap_hits)); }
-
-// Reads the current hit count for a specific branch ID.
-GCRAP_WEAK int64_t crap_cov_get(int32_t id) {
-    if ((uint32_t)id < GCRAP_MAX_BRANCHES) {
-        return (int64_t)g_crap_hits[id];
-    }
-    return 0;
-}
-
-// Writes non-zero branch counters to the specified file path.
-GCRAP_WEAK int32_t crap_cov_dump(crap_bytes_ro path) {
-    char cpath[4096];
-    crap_slice_to_cstr(path, cpath, sizeof(cpath));
-    return (int32_t)crap_write_hits_to_file(cpath);
-}
-
 #if defined(_MSC_VER)
 __declspec(thread) static volatile int32_t g_last_exec_timed_out = 0;
 #else
@@ -527,20 +509,6 @@ GCRAP_WEAK int32_t crap_exec_argv_to_file(crap_bytes_ro prog, crap_bytes_ro arg1
 #endif
 }
 
-// Deletes a file on disk. Returns 0 on success, non-zero on failure.
-GCRAP_WEAK int32_t crap_file_delete(crap_bytes_ro path) {
-    char cpath[4096];
-    crap_slice_to_cstr(path, cpath, sizeof(cpath));
-    if (!cpath[0]) return -1;
-#ifdef _WIN32
-    wchar_t wpath[4096];
-    if (MultiByteToWideChar(CP_UTF8, 0, cpath, -1, wpath, 4096) <= 0) return -1;
-    return DeleteFileW(wpath) ? 0 : -1;
-#else
-    return unlink(cpath);
-#endif
-}
-
 #ifdef _WIN32
 static int crap_win32_remove_tree_w(const wchar_t *wpath) {
     DWORD attrs = GetFileAttributesW(wpath);
@@ -850,12 +818,6 @@ GCRAP_WEAK int32_t crap_exec_in_dir_with_env(crap_bytes_ro dir, crap_bytes_ro cm
         nanosleep(&sleep_ts, NULL);
     }
 #endif
-}
-
-GCRAP_WEAK int32_t crap_exec_with_env_to_file(crap_bytes_ro cmd, crap_bytes_ro env_key, crap_bytes_ro env_val,
-                                               crap_bytes_ro out_path, int32_t timeout_ms) {
-    crap_bytes_ro empty_dir = {NULL, 0};
-    return crap_exec_in_dir_with_env(empty_dir, cmd, env_key, env_val, out_path, timeout_ms);
 }
 
 GCRAP_WEAK int64_t crap_abs_path(crap_bytes_ro path, crap_bytes_rw out) {

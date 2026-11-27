@@ -2,14 +2,15 @@
 // Copyright (c) 2026 Lemon4ksan
 
 // Structural diff and hexadecimal byte difference formatting for assertion diagnostics.
-namespace lit;
+namespace lit_internal;
 
 import std;
 
 fn append_hex_byte<B>(out: B&, b: u8) {
-    let hex_chars = "0123456789ABCDEF";
-    out.push(hex_chars[(b >> 4) as i64]);
-    out.push(hex_chars[(b & 0x0F) as i64]);
+    let hi = (b >> 4) & 0xF;
+    let lo = b & 0xF;
+    out.push(if hi < 10 { '0' + hi } else { 'A' + (hi - 10) });
+    out.push(if lo < 10 { '0' + lo } else { 'A' + (lo - 10) });
 }
 
 // Byte slice differ displaying first mismatch index, hex dump, and ASCII context

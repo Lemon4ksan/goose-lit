@@ -11,7 +11,8 @@ import std;
 // ---- lightweight test library facade ---------------------------------------
 import lit;
 
-// ---- process execution & configuration -------------------------------------
+// ---- process execution, byte helpers & configuration -----------------------
+import sys.bytes;
 import sys.proc;
 import sys.config;
 

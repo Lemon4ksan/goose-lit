@@ -17,16 +17,6 @@ struct RunDirective {
     overflowed: bool       = false,
 }
 
-var g_keep_artifacts: bool      = false;
-var g_test_mode:      u8[..32]  = [];
-var g_test_exec:      u8[..256] = [];
-
-fn configure_runner_options(keep_artifacts: bool, test_mode: const u8[:], test_exec: const u8[:]) {
-    g_keep_artifacts = keep_artifacts;
-    crap::set_bounded(g_test_mode, test_mode);
-    crap::set_bounded(g_test_exec, test_exec);
-}
-
 enum TestStatus {
     Pass,
     Fail,
@@ -206,7 +196,8 @@ fn cleanup_scratch_variants(base: const u8[:]) {
     if file_exists(base) || is_dir(base) {
         crap::native_remove_tree(base);
     }
-    var buf: u8[>..] = [];
+    guard base.len + 6 <= 1024 else { return; }
+    var buf: u8[..1024] = [];
     buf.append(base);
     buf.append(".exe");
     if file_exists(buf[..]) {
@@ -258,9 +249,9 @@ fn resolve_lit_shim_path(prog: const u8[:], shim_file: const u8[:], out: u8[>..]
         k--;
     }
 
-    if last_sep > 0 {
+    if last_sep > 0 && last_sep + 6 + shim_file.len <= 1024 {
         // 1. Check <prog_dir>/shim/<shim_file>
-        var cand: u8[>..] = [];
+        var cand: u8[..1024] = [];
         cand.append(prog[..last_sep]);
         cand.push(sep);
         cand.append("shim");
@@ -296,23 +287,25 @@ fn resolve_lit_shim_path(prog: const u8[:], shim_file: const u8[:], out: u8[>..]
     }
 
     // 3. Check workspace-local shim/<shim_file>
-    var local_cand: u8[>..] = [];
-    local_cand.append("shim");
-    local_cand.push(sep);
-    local_cand.append(shim_file);
-    if file_exists(local_cand[..]) {
-        out.append(local_cand[..]);
-        return;
+    var local_cand: u8[..64] = [];
+    if 5 + shim_file.len <= local_cand.cap {
+        local_cand.append("shim");
+        local_cand.push(sep);
+        local_cand.append(shim_file);
+        if file_exists(local_cand[..]) {
+            out.append(local_cand[..]);
+            return;
+        }
     }
 
     // 4. Materialize embedded shim asset into .lit/cache/shim/<shim_file>
     let embedded = embedded_shim_bytes(shim_file);
-    if embedded.len > 0 {
+    if embedded.len > 0 && 16 + shim_file.len <= 64 {
         crap::ensure_lit_cache_dir();
         if !is_dir(".lit/cache/shim") {
             let _ = make_dir(".lit/cache/shim");
         }
-        var cached: u8[>..] = [];
+        var cached: u8[..64] = [];
         cached.append(".lit");
         cached.push(sep);
         cached.append("cache");
@@ -498,18 +491,6 @@ fn has_main_function(src: const u8[:]) -> bool {
 // crap:trusted
 // crap:trusted-bounds
 fn default_run_command(file_path: const u8[:], src: const u8[:]) -> const u8[:] {
-    if g_test_mode[..] == "check" {
-        return "goose check %s";
-    }
-    if g_test_mode[..] == "build" {
-        if has_filecheck_directives(src) {
-            return "goose build --debug %s -o %t && %t | %FileCheck %s";
-        }
-        if has_main_function(src) || crap::slice_ends_with(file_path, "_test.goose") || crap::slice_ends_with(file_path, "test.goose") {
-            return "goose build --debug %s -o %t && %t";
-        }
-        return "goose check %s";
-    }
     if has_filecheck_directives(src) {
         return "goose %s | %FileCheck %s";
     }
@@ -622,16 +603,9 @@ fn run_single_lit_test_with_timeout(
             line_no: 1,
             command: [],
         };
-        if g_test_exec.len > 0 {
-            def_dir.command.append(g_test_exec[..]);
-            if has_filecheck_directives(src[..]) && !crap::slice_contains(g_test_exec[..], "%FileCheck") {
-                def_dir.command.append(" | %FileCheck %s");
-            }
-        } else {
-            let def_cmd = default_run_command(file_path, src[..]);
-            let def_len = min(def_cmd.len, def_dir.command.cap);
-            def_dir.command.append(def_cmd[..def_len]);
-        }
+        let def_cmd = default_run_command(file_path, src[..]);
+        let def_len = min(def_cmd.len, def_dir.command.cap);
+        def_dir.command.append(def_cmd[..def_len]);
         directives.push(def_dir);
     }
 
@@ -651,7 +625,7 @@ fn run_single_lit_test_with_timeout(
     var cmd:     u8[>..] = [];
     var run_out: u8[>..] = [];
 
-    for d in directives {
+    for &d in directives {
         res.total_runs += 1;
         if d.overflowed {
             res.passed = false;
@@ -721,10 +695,8 @@ fn run_single_lit_test_with_timeout(
     let t1 = (monotonic_now().nanos as! i64) / 1000;
     res.duration_us = t1 - t0;
 
-    if !g_keep_artifacts {
-        cleanup_scratch_variants(cache_scratch[..]);
-        cleanup_scratch_variants(local_scratch[..]);
-    }
+    cleanup_scratch_variants(cache_scratch[..]);
+    cleanup_scratch_variants(local_scratch[..]);
 
     if timed_out {
         res.status = TestStatus.Timeout;

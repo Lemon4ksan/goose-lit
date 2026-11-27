@@ -37,41 +37,38 @@ fn resolve_package_entry_point(target_path: const u8[:], resolved_out: u8[>..]&)
     let last_slash = slice_last_index_of_byte(p, '/');
     let dir_name = if last_slash >= 0 { p[last_slash + 1..] } else { p };
 
-    // 1. Try <dir>/<dir_name>.goose
-    var c1: u8[>..] = [];
-    c1.append(p);
-    c1.push('/');
-    c1.append(dir_name);
-    c1.append(".goose");
-    if file_exists(c1) {
-        resolved_out.append(c1);
+    // 1. Try <dir>/<dir_name>.goose, main.goose, lib.goose, mod.goose
+    var cand: u8[>..] = [];
+    cand.append(p);
+    cand.push('/');
+    cand.append(dir_name);
+    cand.append(".goose");
+    if file_exists(cand) {
+        resolved_out.append(cand);
         return true;
     }
 
-    // 2. Try <dir>/main.goose
-    var c2: u8[>..] = [];
-    c2.append(p);
-    c2.append("/main.goose");
-    if file_exists(c2) {
-        resolved_out.append(c2);
+    cand.clear();
+    cand.append(p);
+    cand.append("/main.goose");
+    if file_exists(cand) {
+        resolved_out.append(cand);
         return true;
     }
 
-    // 3. Try <dir>/lib.goose
-    var c3: u8[>..] = [];
-    c3.append(p);
-    c3.append("/lib.goose");
-    if file_exists(c3) {
-        resolved_out.append(c3);
+    cand.clear();
+    cand.append(p);
+    cand.append("/lib.goose");
+    if file_exists(cand) {
+        resolved_out.append(cand);
         return true;
     }
 
-    // 4. Try <dir>/mod.goose
-    var c4: u8[>..] = [];
-    c4.append(p);
-    c4.append("/mod.goose");
-    if file_exists(c4) {
-        resolved_out.append(c4);
+    cand.clear();
+    cand.append(p);
+    cand.append("/mod.goose");
+    if file_exists(cand) {
+        resolved_out.append(cand);
         return true;
     }
 
@@ -99,34 +96,23 @@ fn resolve_package_entry_point(target_path: const u8[:], resolved_out: u8[>..]&)
     return false;
 }
 
-fn append_compiler_options(cmd: u8[>..]&) {
-    var goose_cc: u8[>..] = [];
-    if !env("GOOSE_CC", goose_cc) {
-        var os_env: u8[>..] = [];
-        let is_win = env("OS", os_env) || file_exists("C:\\Windows");
-        if is_win {
-            cmd.append(" --cc gcc");
-        }
-    }
-}
-
-fn bce_cache_key_hex(entry: const u8[:], mtime: i64, size: i64, out: u8[>..]&) {
-    var raw: u8[>..] = [];
-    raw.append(entry);
-    raw.push(':');
-    append_i64(raw, mtime);
-    raw.push(':');
-    append_i64(raw, size);
-
+fn bce_cache_key_hex<B>(entry: const u8[:], mtime: i64, size: i64, out: B&) {
     var h: u64 = 14695981039346656037;
-    for b in raw {
+    for b in entry {
         h = (h ^ b) * 1099511628211;
     }
-    let hex_chars: const u8[:] = "0123456789abcdef";
+    var meta: u8[..64] = [];
+    meta.push(':');
+    append_i64(meta, mtime);
+    meta.push(':');
+    append_i64(meta, size);
+    for b in meta {
+        h = (h ^ b) * 1099511628211;
+    }
     var sh: i64 = 60;
     while sh >= 0 {
-        let nib = ((h >> (sh as u64)) & 0xF) as i64;
-        out.push(hex_chars[nib]);
+        let nib = ((h >> (sh as u64)) & 0xF) as u8;
+        out.push(if nib < 10 { '0' + nib } else { 'a' + (nib - 10) });
         sh -= 4;
     }
 }
@@ -142,7 +128,7 @@ fn run_goose_bce_lines(target_path: const u8[:], out: u8[>..]&) -> i32 {
     let mtime = native_file_mtime(entry[..]);
     let fsize = native_file_size(entry[..]);
 
-    var cache_path: u8[>..] = [];
+    var cache_path: u8[..64] = [];
     if use_cache && mtime >= 0 && fsize >= 0 {
         ensure_lit_cache_dir();
         cache_path.append(".lit/cache/bce_");

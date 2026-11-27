@@ -68,14 +68,10 @@ fn slice_index_of(haystack: const u8[:], needle: const u8[:]) -> i64 {
     if needle.len == 0 { return 0; }
     guard haystack.len >= needle.len else { return -1; }
     let limit = haystack.len - needle.len;
-    var i: i64 = 0;
-    while i <= limit {
-        let end = i + needle.len;
-        guard end <= haystack.len else { break; }
-        if haystack[i..end] == needle {
+    for i in 0..limit + 1 {
+        if haystack[i..i + needle.len] == needle {
             return i;
         }
-        i++;
     }
     return -1;
 }
@@ -85,16 +81,14 @@ fn slice_contains(haystack: const u8[:], needle: const u8[:]) -> bool {
 }
 
 fn trim_ascii(s: const u8[:]) -> const u8[:] {
-    var start: i64 = 0;
-    var end:   i64 = s.len;
-    while start < end && is_ascii_space(s[start]) {
-        start++;
+    var cur = s;
+    while cur.len > 0 && is_ascii_space(cur[0]) {
+        cur = cur[1..];
     }
-    while end > start && is_ascii_space(s[end - 1]) {
-        end--;
+    while cur.len > 0 && is_ascii_space(cur[cur.len - 1]) {
+        cur = cur[..cur.len - 1];
     }
-    guard start >= 0 && end <= s.len && start <= end else { return ""; }
-    return s[start..end];
+    return cur;
 }
 
 fn parse_u64_slice(s: const u8[:]) -> u64, bool {
@@ -512,28 +506,30 @@ fn short_display_path(path: const u8[:], out: u8[>..]&) {
 
 // Matches `text` against a wildcard `pattern` supporting `*` and `?`.
 fn glob_match(pattern: const u8[:], text: const u8[:]) -> bool {
-    var pi:   i64 = 0;
-    var ti:   i64 = 0;
-    var star: i64 = -1;
-    var m_ti: i64 = 0;
+    var pi:       i64  = 0;
+    var ti:       i64  = 0;
+    var has_star: bool = false;
+    var star_pi:  i64  = 0;
+    var star_ti:  i64  = 0;
 
-    while ti < text.len {
-        if pi < pattern.len && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
+    while ti >= 0 && ti < text.len {
+        if pi >= 0 && pi < pattern.len && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
             pi++;
             ti++;
-        } else if pi < pattern.len && pattern[pi] == '*' {
-            star = pi;
-            m_ti = ti;
+        } else if pi >= 0 && pi < pattern.len && pattern[pi] == '*' {
+            has_star = true;
+            star_pi = pi + 1;
+            star_ti = ti;
             pi++;
-        } else if star >= 0 {
-            pi = star + 1;
-            m_ti++;
-            ti = m_ti;
+        } else if has_star {
+            pi = star_pi;
+            star_ti++;
+            ti = star_ti;
         } else {
             return false;
         }
     }
-    while pi < pattern.len && pattern[pi] == '*' {
+    while pi >= 0 && pi < pattern.len && pattern[pi] == '*' {
         pi++;
     }
     return pi == pattern.len;

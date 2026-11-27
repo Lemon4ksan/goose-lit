@@ -180,14 +180,15 @@ fn check_collect_covered_submodules(pkg_dir: const u8[:], roots_blob: const u8[:
 fn check_discover_build_entries_in_dir(dir: const u8[:], out: u8[>..]&) {
     var entries: u8[>..] = [];
     guard list_dir(dir, entries) else { return; }
-    var lstart: i64     = 0;
-    var cand:   u8[>..] = [];
+    var lstart:     i64       = 0;
+    var goose_name: u8[..256] = [];
+    var cand:       u8[>..]   = [];
     for j in entries.len {
         guard entries[j] == '\n' else { continue; }
         let name = crap::trim_ascii(entries[lstart..j]);
         lstart = j + 1;
-        guard name.len > 6 && crap::slice_ends_with(name, ".build") else { continue; }
-        var goose_name: u8[>..] = [];
+        guard name.len > 6 && name.len <= goose_name.cap && crap::slice_ends_with(name, ".build") else { continue; }
+        goose_name.clear();
         goose_name.append(name[..name.len - 6]);
         goose_name.append(".goose");
         cand.clear();
@@ -209,6 +210,7 @@ fn resolve_enclosing_package_entries(
     crap::normalize_path(target_file, norm_target);
 
     var candidates: u8[>..] = [];
+    var scratch:    u8[>..] = [];
     var c_start:    i64     = 0;
     while c_start < configured_blob.len {
         let rel_nl = crap::slice_index_of_byte(configured_blob[c_start..], '\n');
@@ -216,10 +218,10 @@ fn resolve_enclosing_package_entries(
         let item = crap::trim_ascii(configured_blob[c_start..c_end]);
         c_start = c_end + 1;
         guard item.len > 0 && file_exists(item) && !is_dir(item) else { continue; }
-        var norm_item: u8[>..] = [];
-        crap::normalize_path(item, norm_item);
-        if !check_blob_contains_line(candidates[..], norm_item[..]) {
-            candidates.append(norm_item[..]);
+        scratch.clear();
+        crap::normalize_path(item, scratch);
+        if !check_blob_contains_line(candidates[..], scratch[..]) {
+            candidates.append(scratch[..]);
             candidates.push('\n');
         }
     }
@@ -232,24 +234,23 @@ fn resolve_enclosing_package_entries(
         if cur_dir[..] == "." || cur_dir[..] == "/" {
             break;
         }
-        var next_dir: u8[>..] = [];
-        check_parent_dir(cur_dir[..], next_dir);
-        if next_dir[..] == cur_dir[..] {
+        scratch.clear();
+        check_parent_dir(cur_dir[..], scratch);
+        if scratch[..] == cur_dir[..] {
             break;
         }
         cur_dir.clear();
-        cur_dir.append(next_dir[..]);
+        cur_dir.append(scratch[..]);
     }
     check_discover_build_entries_in_dir(".", candidates);
 
     guard candidates.len > 0 else { return false; }
 
     // Prefer entries that transitively import `norm_target`.
-    var matched:     u8[>..] = [];
-    var single_root: u8[>..] = [];
-    var root_dir:    u8[>..] = [];
-    var covered:     u8[>..] = [];
-    var s:           i64     = 0;
+    // Reuse `cur_dir` for root_dir, `scratch` for single_root.
+    var matched: u8[>..] = [];
+    var covered: u8[>..] = [];
+    var s:       i64     = 0;
     while s < candidates.len {
         let rel_nl = crap::slice_index_of_byte(candidates[s..], '\n');
         let e = if rel_nl >= 0 { s + rel_nl } else { candidates.len };
@@ -257,13 +258,13 @@ fn resolve_enclosing_package_entries(
         s = e + 1;
         guard root_fp.len > 0 else { continue; }
 
-        single_root.clear();
-        single_root.append(root_fp);
-        single_root.push('\n');
-        root_dir.clear();
-        check_parent_dir(root_fp, root_dir);
+        scratch.clear();
+        scratch.append(root_fp);
+        scratch.push('\n');
+        cur_dir.clear();
+        check_parent_dir(root_fp, cur_dir);
         covered.clear();
-        check_collect_covered_submodules(root_dir[..], single_root[..], covered);
+        check_collect_covered_submodules(cur_dir[..], scratch[..], covered);
         if check_blob_contains_line(covered[..], norm_target[..]) {
             matched.append(root_fp);
             matched.push('\n');
@@ -347,11 +348,11 @@ fn check_worker_loop(cfg: CheckWorkerCfg) {
     var list_blob: u8[>..] = [];
     guard read_file(cfg.list_path[..], list_blob) else { return; }
 
-    var fpath:      u8[>..] = [];
-    var slot_path:  u8[>..] = [];
-    var out_buf:    u8[>..] = [];
-    var used_entry: u8[>..] = [];
-    var slot_buf:   u8[>..] = [];
+    var fpath:      u8[>..]   = [];
+    var slot_path:  u8[..320] = [];
+    var out_buf:    u8[>..]   = [];
+    var used_entry: u8[>..]   = [];
+    var slot_buf:   u8[>..]   = [];
 
     while true {
         if cfg.fail_fast && crap::native_atomic_get_stop() != 0 {
@@ -564,11 +565,11 @@ fn handle_check_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&)
     }
 
     let dt_all_ms = ((monotonic_now().nanos as! i64) / 1000 - t0_all) / 1000;
-    var passed:    i32     = 0;
-    var failed:    i32     = 0;
-    var fp_buf:    u8[>..] = [];
-    var slot_p:    u8[>..] = [];
-    var slot_data: u8[>..] = [];
+    var passed:    i32      = 0;
+    var failed:    i32      = 0;
+    var fp_buf:    u8[>..]  = [];
+    var slot_p:    u8[..64] = [];
+    var slot_data: u8[>..]  = [];
 
     for idx in total {
         fp_buf.clear();
@@ -616,7 +617,7 @@ fn handle_check_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&)
     }
     if file_exists(list_path) { delete_file(list_path); }
 
-    var sum: u8[>..] = [];
+    var sum: u8[..256] = [];
     sum.append("Check Summary: ");
     format(sum, passed, "/", total, " passed, ", failed, " failed");
     if covered_submodules > 0 {

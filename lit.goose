@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Lemon4ksan
 
-// goose-lit library facade: lightweight in-process testkit, assertions, mocks,
-// allocation counter, stage profiler API, and binary wire verification.
-// CLI engines (runner, FileCheck, G-CRAP, coverage, profiler/fuzzer/SLOC CLIs)
-// reside in cli.goose so test imports do not compile CLI subsystems.
+// goose-lit public library facade (namespace lit only): in-process testkit,
+// assertions, mocks, allocation counter, stage profiler / testing.B benchmarks,
+// and binary wire verification. Internal CLI engines (runner, FileCheck, G-CRAP,
+// coverage, profiler/fuzzer/SLOC CLIs, and namespace crap) live in cli.goose.
 namespace lit;
 
 import std;
 
-// ---- core test utilities ---------------------------------------------------
-import sys.bytes;
+// ---- monotonic clock & stopwatch primitives --------------------------------
 import sys.time;
 
 // ---- packet edge, stream mutator & hex/SIMD inspector ----------------------

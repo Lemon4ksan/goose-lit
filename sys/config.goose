@@ -14,9 +14,6 @@ struct LitConfig {
     tests_dir_buf:        u8[..256]  = [],
     src_dir_buf:          u8[..256]  = [],
     cc_buf:               u8[..256]  = [],
-    cc_source_buf:        u8[..32]   = [],
-    test_mode_buf:        u8[..32]   = [],
-    test_exec_buf:        u8[..256]  = [],
     exclude_buf:          u8[..1024] = [],
     format_buf:           u8[..32]   = [],
     prefix_buf:           u8[..32]   = [],
@@ -196,18 +193,9 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
         set_bounded(cfg.src_dir_buf, val);
         return true;
     }
-    if key == "test_mode" {
-        set_bounded(cfg.test_mode_buf, val);
-        return true;
-    }
-    if key == "test_exec" {
-        set_bounded(cfg.test_exec_buf, val);
-        return true;
-    }
     let host_os = native_host_os();
     if key == "goose_cc" || key == "cc" {
         if !cfg.cc_os_specific && set_bounded(cfg.cc_buf, val) {
-            set_bounded(cfg.cc_source_buf, "config");
             native_setenv("GOOSE_CC", val);
         }
         return true;
@@ -221,7 +209,6 @@ fn apply_path_setting(key: const u8[:], val: const u8[:], cfg: LitConfig&) -> bo
             (host_os == 3 && is_cc_mac);
         if matches_os && set_bounded(cfg.cc_buf, val) {
             cfg.cc_os_specific = true;
-            set_bounded(cfg.cc_source_buf, "config");
             native_setenv("GOOSE_CC", val);
         }
         return true;
@@ -478,13 +465,9 @@ fn load_lit_config(custom_path: const u8[:], cfg: LitConfig&) -> bool {
         var cur_cc: u8[>..] = [];
         if env("GOOSE_CC", cur_cc) && cur_cc.len > 0 {
             set_bounded(cfg.cc_buf, cur_cc[..]);
-            set_bounded(cfg.cc_source_buf, "env");
         } else if native_host_os() == 1 && native_has_executable("gcc") == 1 {
             set_bounded(cfg.cc_buf, "gcc");
-            set_bounded(cfg.cc_source_buf, "default (PATH)");
             native_setenv("GOOSE_CC", "gcc");
-        } else {
-            set_bounded(cfg.cc_source_buf, "default");
         }
     }
     return cfg.loaded;

@@ -52,18 +52,50 @@ fn test_basic_assertions(t: lit::T&) {
     lit::assert_elements_match(t, nums_a[..], nums_b[..]);
 
     lit::require_true(t, true);
+    lit::require_false(t, false);
     lit::require_ok(t, true);
     lit::require_eq(t, nums_a.len, 5);
+    lit::require_bytes_eq(t, bytes_a, bytes_b);
+    lit::require_ne(t, 1, 2);
+    lit::require_gt(t, 5, 2);
+    lit::require_ge(t, 5, 5);
+    lit::require_lt(t, 2, 5);
+    lit::require_le(t, 5, 5);
+
+    lit::assert_true(t, lit::is_ok(t));
+    lit::assert_true(t, lit::is_passed(t));
+    lit::assert_false(t, lit::is_failed(t));
+    lit::assert_false(t, lit::is_aborted(t));
+    lit::assert_false(t, lit::is_skipped(t));
+    lit::assert_gt(t, lit::count(t), 0);
+    lit::assert_eq(t, lit::failures_len(t), 0);
+
+    var scratch_t = lit::new_test("scratch_lifecycle");
+    lit::fail_now(scratch_t, "boom", "detail");
+    lit::assert_true(t, lit::is_failed(scratch_t) && lit::is_aborted(scratch_t));
+    lit::assert_eq(t, lit::failures_len(scratch_t), 1);
+
+    var skip_t = lit::new_test("scratch_skip");
+    lit::skip(skip_t, "not applicable");
+    lit::assert_true(t, lit::is_skipped(skip_t) && lit::is_aborted(skip_t));
+}
+
+fn balanced_push_pop(buf: u8[>..]&) {
+    buf.push('x');
+    buf.pop();
 }
 
 fn test_mocks_and_fuzzing(t: lit::T&) {
     // Mock clock
     var clock = lit::new_mock_clock(1000);
     lit::assert_eq(t, clock.now_us, 1000);
+    lit::advance_us(clock, 500);
     lit::advance_ms(clock, 5);
-    lit::assert_eq(t, clock.now_us, 6000);
+    lit::assert_eq(t, clock.now_us, 6500);
     lit::advance_sec(clock, 2);
-    lit::assert_eq(t, clock.now_us, 2006000);
+    lit::assert_eq(t, clock.now_us, 2006500);
+    lit::advance_days(clock, 1);
+    lit::assert_gt(t, clock.now_us, 2006500);
 
     // Mock monotonic clock
     var mono = lit::new_mock_mono_clock(500);
@@ -75,6 +107,15 @@ fn test_mocks_and_fuzzing(t: lit::T&) {
     let r_val = lit::next_range(rng, 10, 20);
     lit::assert_ge(t, r_val, 10);
     lit::assert_lt(t, r_val, 20);
+    let _ = lit::next_bool(rng);
+    var rnd_s: u8[..16] = [];
+    lit::next_ascii_string(rng, rnd_s, 12);
+    lit::assert_eq(t, rnd_s.len, 12);
+
+    // Balanced data-stack check
+    var diag:        u8[>..] = [];
+    var scratch_arr: u8[>..] = [];
+    lit::assert_true(t, lit::assert_balanced(scratch_arr, diag, balanced_push_pop));
 
     // Test Spy
     var s = lit::spy<SpyParam, bool>(true);

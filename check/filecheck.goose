@@ -145,8 +145,10 @@ fn parse_bracket_seg(body: const u8[:], out_segs: PatternSeg[..32]&) -> bool {
         let colon_pos = crap::slice_index_of_byte(num_body, ':');
         if colon_pos >= 0 {
             let name = crap::trim_ascii(num_body[..colon_pos]);
-            var spec = crap::trim_ascii(num_body[colon_pos + 1..]);
-            if spec.len == 0 { spec = "[0-9]+"; }
+            let spec = crap::trim_ascii(num_body[colon_pos + 1..]);
+            if spec.len == 0 {
+                return push_seg(out_segs, SegKind.NumDef, name, "[0-9]+");
+            }
             return push_seg(out_segs, SegKind.NumDef, name, spec);
         }
         let plus_pos = crap::slice_index_of_byte(num_body, '+');
@@ -446,7 +448,7 @@ fn match_pattern_in_line(line: const u8[:], pat: const u8[:], ctx: FileCheckCont
         }
 
         if match_ok {
-            for lv in local_vars {
+            for &lv in local_vars {
                 set_var(ctx, lv.name[..], lv.val[..]);
             }
             out_end_pos = pos;

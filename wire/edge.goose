@@ -6,9 +6,30 @@
 namespace lit;
 
 import std;
-import sys.bytes;
 
 const VIRTUAL_PAGE_SIZE: i64 = 65536;
+
+inline fn lit_internal::is_ascii_space(b: u8) -> bool {
+    return b == ' ' || b == '\t' || b == '\r' || b == '\n';
+}
+
+fn lit_internal::trim_ascii(s: const u8[:]) -> const u8[:] {
+    var cur = s;
+    while cur.len > 0 && lit_internal::is_ascii_space(cur[0]) {
+        cur = cur[1..];
+    }
+    while cur.len > 0 && lit_internal::is_ascii_space(cur[cur.len - 1]) {
+        cur = cur[..cur.len - 1];
+    }
+    return cur;
+}
+
+inline fn lit_internal::hex_nibble_val(c: u8) -> i32 {
+    if c >= '0' && c <= '9' { return c - '0'; }
+    if c >= 'a' && c <= 'f' { return c - 'a' + 10; }
+    if c >= 'A' && c <= 'F' { return c - 'A' + 10; }
+    return -1;
+}
 
 // Verifies that a decoder/parser handles all fragmented stream prefixes gracefully.
 // For any prefix of length 1..total_len, invokes prefix_checker(prefix).
@@ -27,8 +48,7 @@ fn verify_split_stream<F: fn(const u8[:]) -> i64>(
     }
 
     // Test each prefix 1..(total_len - 1)
-    var p_len: i64 = 1;
-    while p_len < total_len {
+    for p_len in 1..total_len {
         let prefix = full_payload[..p_len];
         let code = F(prefix);
         if code != incomplete_code {
@@ -38,7 +58,6 @@ fn verify_split_stream<F: fn(const u8[:]) -> i64>(
             format(out_diag, incomplete_code, "\n");
             return false;
         }
-        p_len += 1;
     }
 
     // Verify full payload
@@ -62,27 +81,27 @@ fn verify_split_stream<F: fn(const u8[:]) -> i64>(
 
 // Parses hex string or quoted ASCII into a byte buffer.
 fn parse_packet_payload(input_str: const u8[:], out_bytes: u8[>..]&) -> bool {
-    let s = crap::trim_ascii(input_str);
+    let s = lit_internal::trim_ascii(input_str);
     guard s.len > 0 else { return false; }
     out_bytes.clear();
 
     if s.len >= 2 && s[0] == '"' && s[s.len - 1] == '"' {
-        let inner = s[1..s.len - 1];
-        var i: i64 = 0;
-        while i < inner.len {
-            let b = inner[i];
-            if b == '\\' && i + 1 < inner.len {
-                let nb = inner[i + 1];
-                if nb == 'n' { out_bytes.push(10); i += 2; }
-                else if nb == 'r' { out_bytes.push(13); i += 2; }
-                else if nb == 't' { out_bytes.push(9); i += 2; }
-                else if nb == '0' { out_bytes.push(0); i += 2; }
-                else if nb == '\\' { out_bytes.push(92); i += 2; }
-                else if nb == '"' { out_bytes.push(34); i += 2; }
-                else { out_bytes.push(nb); i += 2; }
+        var inner = s[1..s.len - 1];
+        while inner.len > 0 {
+            let b = inner[0];
+            if b == '\\' && inner.len >= 2 {
+                let nb = inner[1];
+                if nb == 'n' { out_bytes.push(10); }
+                else if nb == 'r' { out_bytes.push(13); }
+                else if nb == 't' { out_bytes.push(9); }
+                else if nb == '0' { out_bytes.push(0); }
+                else if nb == '\\' { out_bytes.push(92); }
+                else if nb == '"' { out_bytes.push(34); }
+                else { out_bytes.push(nb); }
+                inner = inner[2..];
             } else {
                 out_bytes.push(b);
-                i += 1;
+                inner = inner[1..];
             }
         }
         return out_bytes.len > 0;
@@ -93,40 +112,23 @@ fn parse_packet_payload(input_str: const u8[:], out_bytes: u8[>..]&) -> bool {
         clean = clean[2..];
     }
 
-    var i: i64 = 0;
-    while i < clean.len {
-        if clean[i] == ' ' || clean[i] == '\t' || clean[i] == '\r' || clean[i] == '\n' {
-            i += 1;
+    while clean.len > 0 {
+        if lit_internal::is_ascii_space(clean[0]) {
+            clean = clean[1..];
             continue;
         }
-        if i + 1 >= clean.len {
+        guard clean.len >= 2 else {
             out_bytes.clear();
             return false;
         }
-
-        var h0: u8 = 0;
-        var h1: u8 = 0;
-        let c0 = clean[i];
-        let c1 = clean[i + 1];
-
-        if c0 >= '0' && c0 <= '9' { h0 = c0 - '0'; }
-        else if c0 >= 'a' && c0 <= 'f' { h0 = c0 - 'a' + 10; }
-        else if c0 >= 'A' && c0 <= 'F' { h0 = c0 - 'A' + 10; }
-        else {
+        let h0 = lit_internal::hex_nibble_val(clean[0]);
+        let h1 = lit_internal::hex_nibble_val(clean[1]);
+        guard h0 >= 0 && h1 >= 0 else {
             out_bytes.clear();
             return false;
         }
-
-        if c1 >= '0' && c1 <= '9' { h1 = c1 - '0'; }
-        else if c1 >= 'a' && c1 <= 'f' { h1 = c1 - 'a' + 10; }
-        else if c1 >= 'A' && c1 <= 'F' { h1 = c1 - 'A' + 10; }
-        else {
-            out_bytes.clear();
-            return false;
-        }
-
-        out_bytes.push((h0 << 4) | h1);
-        i += 2;
+        out_bytes.push(((h0 << 4) | h1) as u8);
+        clean = clean[2..];
     }
 
     return out_bytes.len > 0;

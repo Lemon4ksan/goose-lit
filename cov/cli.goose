@@ -229,13 +229,13 @@ thread_fn cov_parallel_worker(cfg: CovWorkerCfg) {
     var list_blob: u8[>..] = [];
     guard read_file(cfg.list_path[..], list_blob) else { return; }
 
-    var test_rel:  u8[>..] = [];
-    var test_src:  u8[>..] = [];
-    var cmd:       u8[>..] = [];
-    var prof_path: u8[>..] = [];
-    var slot_path: u8[>..] = [];
-    var run_out:   u8[>..] = [];
-    var slot_buf:  u8[>..] = [];
+    var test_rel:  u8[>..]   = [];
+    var test_src:  u8[>..]   = [];
+    var cmd:       u8[>..]   = [];
+    var prof_path: u8[..320] = [];
+    var slot_path: u8[..320] = [];
+    var run_out:   u8[>..]   = [];
+    var slot_buf:  u8[>..]   = [];
 
     while true {
         let idx = crap::native_work_claim(cfg.total);
@@ -266,31 +266,13 @@ thread_fn cov_parallel_worker(cfg: CovWorkerCfg) {
         cmd.push(' ');
         cmd.append(test_rel[..]);
         cmd.append(" && ");
-        if !cfg.is_win { cmd.append("./"); }
-        cmd.append("..\\cov_bin_");
-        if !cfg.is_win {
-            cmd.clear();
-            cmd.append("goose build -O0");
-            if cfg.cc.len > 0 {
-                cmd.append(" --cc ");
-                cmd.append(cfg.cc[..]);
-            }
-            cmd.append(" --include ../cov_rt.h");
-            if crap::slice_contains(test_src[..], "%prof_hook") || crap::slice_contains(test_src[..], "prof_hook.h") {
-                cmd.append(" --include ../prof_hook.h");
-            }
-            if crap::slice_contains(test_src[..], "%alloc_hook") || crap::slice_contains(test_src[..], "alloc_hook.h") {
-                cmd.append(" --include ../alloc_hook.h");
-            }
-            cmd.append(" -o ../cov_bin_");
-            format(cmd, idx);
-            cmd.push(' ');
-            cmd.append(test_rel[..]);
-            cmd.append(" && ../cov_bin_");
-            format(cmd, idx);
-        } else {
+        if cfg.is_win {
+            cmd.append("..\\cov_bin_");
             format(cmd, idx);
             cmd.append(".exe");
+        } else {
+            cmd.append("../cov_bin_");
+            format(cmd, idx);
         }
 
         prof_path.clear();

@@ -38,13 +38,6 @@ extern fn native_atomic_set_stop(v: i32) = "crap_atomic_set_stop";
 extern fn native_atomic_get_stop() -> i32 = "crap_atomic_get_stop";
 extern fn native_file_mtime(path: const u8[:]) -> i64 = "crap_file_mtime";
 extern fn native_file_size(path: const u8[:]) -> i64 = "crap_file_size";
-extern fn native_exec_with_env_to_file(
-    cmd:        const u8[:],
-    env_key:    const u8[:],
-    env_val:    const u8[:],
-    out_path:   const u8[:],
-    timeout_ms: i32,
-) -> i32 = "crap_exec_with_env_to_file";
 extern fn native_exec_in_dir_with_env(
     dir:        const u8[:],
     cmd:        const u8[:],
@@ -79,21 +72,25 @@ fn resolve_abs_path(path: const u8[:], out: u8[>..]&) -> bool {
     return true;
 }
 
-// Runs a program with NUL-delimited arguments directly (no shell) and captures output into `out`.
-fn exec_argv_nul_capture(argv_nul: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32 {
+fn build_cmd_capture_path(out: u8[..128]&) {
     let seq = native_next_seq();
     ensure_lit_cache_dir();
-
-    var tmp_path: u8[>..] = [];
+    out.clear();
     if is_dir(".lit/cache") {
-        tmp_path.append(".lit/cache/.gcrap_cmd_");
+        out.append(".lit/cache/.gcrap_cmd_");
     } else {
-        tmp_path.append(".gcrap_cmd_");
+        out.append(".gcrap_cmd_");
     }
-    append_u64(tmp_path, clock_ns() as u64);
-    tmp_path.push('_');
-    append_u64(tmp_path, seq);
-    tmp_path.append(".tmp");
+    append_u64(out, clock_ns() as u64);
+    out.push('_');
+    append_u64(out, seq);
+    out.append(".tmp");
+}
+
+// Runs a program with NUL-delimited arguments directly (no shell) and captures output into `out`.
+fn exec_argv_nul_capture(argv_nul: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32 {
+    var tmp_path: u8[..128] = [];
+    build_cmd_capture_path(tmp_path);
 
     let rc = native_exec_argv_nul_to_file(argv_nul, tmp_path[..], timeout_ms);
     if file_exists(tmp_path[..]) {
@@ -110,13 +107,13 @@ fn clean_stale_cache() {
     guard is_dir(".lit/cache") else { return; }
     var entries: u8[>..] = [];
     guard list_dir(".lit/cache", entries) else { return; }
-    var full_path: u8[>..] = [];
-    var start:     i64     = 0;
+    var full_path: u8[..256] = [];
+    var start:     i64       = 0;
     for i in entries.len {
         guard entries[i] == '\n' else { continue; }
         let name = trim_ascii(entries[start..i]);
         start = i + 1;
-        if slice_starts_with(name, ".gcrap_cmd_") && slice_ends_with(name, ".tmp") {
+        if name.len <= 200 && slice_starts_with(name, ".gcrap_cmd_") && slice_ends_with(name, ".tmp") {
             full_path.clear();
             full_path.append(".lit/cache/");
             full_path.append(name);
@@ -146,28 +143,17 @@ fn exec_capture(cmd: const u8[:], out: u8[>..]&) -> i32 {
 
 // Runs an external command with an optional millisecond timeout and captures stdout/stderr into `out`.
 fn exec_capture_timeout(cmd: const u8[:], timeout_ms: i32, out: u8[>..]&) -> i32 {
-    let seq = native_next_seq();
-    ensure_lit_cache_dir();
-
-    var tmp_path: u8[>..] = [];
-    if is_dir(".lit/cache") {
-        tmp_path.append(".lit/cache/.gcrap_cmd_");
-    } else {
-        tmp_path.append(".gcrap_cmd_");
-    }
-    append_u64(tmp_path, clock_ns() as u64);
-    tmp_path.push('_');
-    append_u64(tmp_path, seq);
-    tmp_path.append(".tmp");
+    var tmp_path: u8[..128] = [];
+    build_cmd_capture_path(tmp_path);
 
     let rc = if timeout_ms > 0 {
-        native_exec_to_file_timeout(cmd, tmp_path, timeout_ms)
+        native_exec_to_file_timeout(cmd, tmp_path[..], timeout_ms)
     } else {
-        native_exec_to_file(cmd, tmp_path)
+        native_exec_to_file(cmd, tmp_path[..])
     };
-    if file_exists(tmp_path) {
-        read_file(tmp_path, out);
-        delete_file(tmp_path);
+    if file_exists(tmp_path[..]) {
+        read_file(tmp_path[..], out);
+        delete_file(tmp_path[..]);
     }
     return rc;
 }
@@ -181,24 +167,13 @@ fn exec_in_dir_with_env_capture(
     timeout_ms: i32,
     out:        u8[>..]&,
 ) -> i32 {
-    let seq = native_next_seq();
-    ensure_lit_cache_dir();
+    var tmp_path: u8[..128] = [];
+    build_cmd_capture_path(tmp_path);
 
-    var tmp_path: u8[>..] = [];
-    if is_dir(".lit/cache") {
-        tmp_path.append(".lit/cache/.gcrap_cmd_");
-    } else {
-        tmp_path.append(".gcrap_cmd_");
-    }
-    append_u64(tmp_path, clock_ns() as u64);
-    tmp_path.push('_');
-    append_u64(tmp_path, seq);
-    tmp_path.append(".tmp");
-
-    let rc = native_exec_in_dir_with_env(dir, cmd, env_key, env_val, tmp_path, timeout_ms);
-    if file_exists(tmp_path) {
-        read_file(tmp_path, out);
-        delete_file(tmp_path);
+    let rc = native_exec_in_dir_with_env(dir, cmd, env_key, env_val, tmp_path[..], timeout_ms);
+    if file_exists(tmp_path[..]) {
+        read_file(tmp_path[..], out);
+        delete_file(tmp_path[..]);
     }
     return rc;
 }
@@ -212,24 +187,13 @@ fn exec_argv_capture(
     timeout_ms: i32,
     out:        u8[>..]&,
 ) -> i32 {
-    let seq = native_next_seq();
-    ensure_lit_cache_dir();
+    var tmp_path: u8[..128] = [];
+    build_cmd_capture_path(tmp_path);
 
-    var tmp_path: u8[>..] = [];
-    if is_dir(".lit/cache") {
-        tmp_path.append(".lit/cache/.gcrap_cmd_");
-    } else {
-        tmp_path.append(".gcrap_cmd_");
-    }
-    append_u64(tmp_path, clock_ns() as u64);
-    tmp_path.push('_');
-    append_u64(tmp_path, seq);
-    tmp_path.append(".tmp");
-
-    let rc = native_exec_argv_to_file(prog, arg1, arg2, arg3, tmp_path, timeout_ms);
-    if file_exists(tmp_path) {
-        read_file(tmp_path, out);
-        delete_file(tmp_path);
+    let rc = native_exec_argv_to_file(prog, arg1, arg2, arg3, tmp_path[..], timeout_ms);
+    if file_exists(tmp_path[..]) {
+        read_file(tmp_path[..], out);
+        delete_file(tmp_path[..]);
     }
     return rc;
 }

@@ -10,11 +10,8 @@ import testkit.context;
 
 fn run<F: fn(T&)>(test_context: T&, sub_name: const u8[:]) -> bool {
     if test_context.aborted { return false; }
-    var subs = [new_test(sub_name, test_context.level + 1)];
-    for &sub in subs {
-        F(sub);
-    }
-    let sub = subs[0];
+    var sub = new_test(sub_name, test_context.level + 1);
+    F(sub);
     test_context.assertions_count += sub.assertions_count;
     if sub.failed {
         test_context.failed = true;
@@ -38,11 +35,8 @@ fn run_table<Row, F: fn(T&, const Row&, i64)>(
     for row_idx in rows.len {
         var row_title: u8[..128] = [];
         format(row_title, table_name, "[#", row_idx, "]");
-        var subs = [new_test(row_title[..], test_context.level + 1)];
-        for &sub in subs {
-            F(sub, rows[row_idx], row_idx);
-        }
-        let sub = subs[0];
+        var sub = new_test(row_title[..], test_context.level + 1);
+        F(sub, rows[row_idx], row_idx);
         test_context.assertions_count += sub.assertions_count;
         if sub.failed {
             all_ok = false;
@@ -101,7 +95,7 @@ fn run_case<F: fn(T&)>(runner_ref: Runner&, case_name: const u8[:]) -> bool {
             " checks):",
         );
         for fail_idx in test_context.failures.len {
-            let f_item = test_context.failures[fail_idx];
+            let f_item .= test_context.failures[fail_idx];
             print("    #", fail_idx + 1, " [", f_item.subtest[..], "] ", f_item.summary[..]);
             if f_item.detail.len > 0 {
                 print(f_item.detail[..]);

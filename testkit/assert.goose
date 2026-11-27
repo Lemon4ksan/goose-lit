@@ -53,7 +53,7 @@ fn assert_bytes_eq(t: T&, got: const u8[:], want: const u8[:], label: const u8[:
     if got != want {
         var det: u8[..512] = [];
         if label.len > 0 { format(det, label, "\n"); }
-        format_bytes_diff(det, got, want);
+        lit_internal::format_bytes_diff(det, got, want);
         record_failure(t, "assert_bytes_eq mismatch", det[..]);
         return false;
     }
@@ -65,7 +65,7 @@ fn assert_struct_eq<Val>(t: T&, got: const Val&, want: const Val&, label: const 
     t.assertions_count += 1;
     var det: u8[..512] = [];
     if label.len > 0 { format(det, label, "\n"); }
-    if diff_struct_fields(det, got, want) {
+    if lit_internal::diff_struct_fields(det, got, want) {
         record_failure(t, "assert_struct_eq field mismatch", det[..]);
         return false;
     }
@@ -169,7 +169,7 @@ fn assert_not_contains(t: T&, haystack: const u8[:], needle: const u8[:], label:
 }
 
 // Scans slice b for an unused occurrence of val
-fn find_unmatched_element<Val>(val: const Val&, b: const Val[:], used: bool[:]) -> i64 {
+fn lit_internal::find_unmatched_element<Val>(val: const Val&, b: const Val[:], used: bool[:]) -> i64 {
     for j in b.len {
         if !used[j] && val == b[j] {
             return j;
@@ -192,7 +192,7 @@ fn assert_elements_match<Val>(t: T&, a: const Val[:], b: const Val[:], label: co
     for i in b.len { used.push(false); }
 
     for i in a.len {
-        let match_idx = find_unmatched_element(a[i], b, used[..]);
+        let match_idx = lit_internal::find_unmatched_element(a[i], b, used[..]);
         if match_idx >= 0 {
             used[match_idx] = true;
         } else {
