@@ -7,24 +7,28 @@
 [![Platform: Linux x64](https://img.shields.io/badge/platform-Linux%20x64-blue.svg?style=flat-square)](https://github.com/Lemon4ksan/goose-lit/releases)
 [![Platform: Windows x64](https://img.shields.io/badge/platform-Windows%20x64-blue.svg?style=flat-square)](https://github.com/Lemon4ksan/goose-lit/releases)
 
-Test runner, FileCheck pattern matcher, wire stream verifier, and static complexity analyzer for the [Goose programming language](https://github.com/aardappel/goose).
+Test runner, FileCheck pattern matcher, branch coverage collector, stage profiler, coverage-guided fuzzer, wire stream verifier, and G-CRAP / SLOC gate tool for the [Goose programming language](https://github.com/aardappel/goose).
 
 ## Overview
 
 goose-lit tests Goose programs through standard input and output streams. Test files declare shell command pipelines in comments; goose-lit executes these commands and checks the resulting output against expected patterns. Libraries and applications are tested from the outside, so test runners, assertions, and mock structures do not compile into production binaries.
 
 Components:
-- LIT runner: finds test files and executes `// RUN:` commands with `%s`, `%S`, `%t`, `%FileCheck`, `%lit`, and `%not` substitutions.
-- FileCheck engine: compares program stdout with patterns, regular expressions (`{{...}}`), and variable captures (`[[VAR:regex]]`).
-- Wire verifier: tests packet parsers against split streams (`verify_split_stream`) and byte mutations (`mutate_stream`).
-- G-CRAP analyzer: calculates cyclomatic and cognitive complexity, unproven bounds check markers (`bce:keep`), and branch coverage weights.
-- Thread isolation: runs tests in subprocesses or isolated threads with panic capture.
+- LIT runner: discovers test files and executes `// RUN:` commands in parallel with `%s`, `%S`, `%t`, `%FileCheck`, `%lit`, `%not`, `%alloc_hook`, `%prof_hook`, `%fuzz_driver`, and `%cov_rt` substitutions.
+- FileCheck engine: compares program stdout with patterns, regular expressions (`{{...}}`), variable captures (`[[VAR:regex]]`), and numeric expressions (`[[#VAR + N]]`).
+- Branch coverage collector (`cov`): instruments `.goose` branches in an isolated shadow workspace, runs tests, merges `.gcrap-cov` profiles, and exports LCOV tracefiles.
+- Stage profiler and benchmark runner (`profile`): compiles and executes cycle-accurate stage profiles and `testing.B`-style benchmarks with benchstat comparisons.
+- Coverage-guided fuzzer (`fuzz`): compiles Goose fuzz targets with SanitizerCoverage or libFuzzer and runs mutation campaigns with RSS drift and complexity gates.
+- Cycles-vs-SLOC radar (`sloc`): measures SLOC, packing density, compiler smells, dead functions, multi-entry BCE counts, and Pareto cycle regressions.
+- Wire verifier (`lit::wire`): tests packet parsers against split streams (`verify_split_stream`) and byte mutations (`mutate_stream`).
+- G-CRAP analyzer (`crap`, `gate`): calculates cyclomatic and cognitive complexity, unproven bounds check markers (`bce:keep`), and real branch coverage weights.
+- In-process testkit (`lit::`): assertions, mocks, deterministic clocks, allocation counters, and contained-thread panic capture.
 
 ## Installation
 
 ### Prebuilt release binaries
 
-Prebuilt binaries for Linux (x86_64) and Windows (x86_64) are attached to each GitHub Release.
+Prebuilt standalone binaries for Linux (x86_64) and Windows (x86_64) are attached to each GitHub Release. Runtime shim headers and drivers (`alloc_hook.h`, `prof_hook.h`, `cov_rt.h`, `fuzz_driver.c`) are embedded inside the binary and materialized into `.lit/cache/shim/` on demand when no sibling `shim/` directory is present.
 
 #### Linux (x86_64)
 
@@ -55,7 +59,7 @@ if ($userPath -notlike "*$installDir*") {
 
 ### Compiling from source
 
-Requirements: Goose compiler v2026.3 or later and a C compiler (GCC or Clang).
+Requirements: Goose compiler `v2026.4` or later and a C11 compiler (GCC or Clang).
 
 ```bash
 git clone https://github.com/Lemon4ksan/goose-lit.git
@@ -86,14 +90,15 @@ Or target a specific directory or file:
 
 ```bash
 goose-lit tests/
+goose-lit tests/ -j 4 --fail-fast
 goose-lit tests/my_feature_test.goose
 ```
 
 Test discovery and execution rules:
-- Files with `// RUN:` directives: executes each declared command pipeline in sequence.
-- Files with `// CHECK:` patterns: automatically executes `goose %s | %FileCheck %s`.
-- Test files (`*_test.goose` or files declaring `fn main`): automatically executes `goose %s`.
-- Interface tests without `main`: verified with `goose check %s`.
+- Files with `// RUN:` directives execute each declared command pipeline in sequence.
+- Files with `// CHECK:` patterns automatically execute `goose %s | %FileCheck %s`.
+- Test files (`*_test.goose` or files declaring `fn main`) automatically execute `goose %s`.
+- Interface tests without `main` are verified with `goose check %s`.
 - Captured command output and temporary buffers are kept in `.lit/cache/` and cleaned up automatically.
 
 Example output:
@@ -139,7 +144,7 @@ To run FileCheck from a standard input pipe:
 goose run sample.goose | goose-lit filecheck sample.goose
 ```
 
-### Static analysis and complexity gates
+### Static analysis, real coverage, and complexity gates
 
 Scan source files for cyclomatic complexity and unproven compiler bounds checks:
 
@@ -147,10 +152,23 @@ Scan source files for cyclomatic complexity and unproven compiler bounds checks:
 goose-lit crap src/
 ```
 
-Enforce a G-CRAP risk ceiling in CI (exits with code 1 on violation):
+Enforce the static complexity and BCE gate in CI (exits with code 1 on violation):
 
 ```bash
-goose-lit gate src/ 25.0 --cov 0.85
+goose-lit gate src/ 25.0
+```
+
+Collect real branch coverage and evaluate G-CRAP against the resulting `.gcrap-cov` profile:
+
+```bash
+goose-lit cov src/ --tests tests/ --out .lit/cache/cov/merged.gcrap-cov --lcov coverage.info
+goose-lit gate src/ 25.0 --cov .lit/cache/cov/merged.gcrap-cov
+```
+
+Run format check, typecheck, G-CRAP gate, and an optional LIT test in one command:
+
+```bash
+goose-lit verify src/parser.goose --max-gcrap 25 --lit tests/parser_test.goose
 ```
 
 ## Command reference
@@ -159,38 +177,54 @@ goose-lit gate src/ 25.0 --cov 0.85
 
 | Subcommand | Syntax | Purpose |
 | :--- | :--- | :--- |
-| `<path>` | `goose-lit <file\|dir>` | Recursively discovers and executes all `// RUN:` test directives. |
+| `<path>` | `goose-lit <file\|dir>` | Recursively discovers and executes `.goose` / `.lit` tests. |
+| `check` | `goose-lit check <path...>` | Typechecks `.goose` files in parallel (`-j`, `--filter`, `--fail-fast`). |
+| `cov` | `goose-lit cov <src_target>` | Instruments branches, runs tests, merges `.gcrap-cov`, and exports LCOV. |
+| `verify` | `goose-lit verify <target>` | Runs `goose format --check`, `goose check`, `gate`, and optional `--lit`. |
 | `filecheck` | `goose-lit filecheck <file>` | Verifies standard input stream against FileCheck directives in `<file>`. |
-| `gate` | `goose-lit gate <path> [max]` | Enforces G-CRAP risk gate ceiling (default: `25.0`, exits `1` on violation). |
-| `crap` | `goose-lit crap <path>` | Calculates cyclomatic complexity and unproven bounds checks. |
-| `inspect` | `goose-lit inspect <file\|hex>` | Dumps byte buffers in hex/ASCII or 128-bit SIMD lanes. |
 | `not` | `goose-lit not <command...>` | Executes a command pipeline and inverts exit status (`0` to `1`, non-zero to `0`). |
+| `gate` | `goose-lit gate <path> [max]` | Enforces G-CRAP risk gate ceiling (default: `25.0`, exits `1` on violation). |
+| `crap` | `goose-lit crap <path>` | Calculates cyclomatic complexity, cognitive complexity, and unproven bounds checks. |
+| `profile` | `goose-lit profile [bench.goose]` | Builds and runs stage profiler or `testing.B` benchmark suites with benchstat diffs. |
+| `sloc` | `goose-lit sloc [path...]` | Runs cycles-vs-SLOC radar, anti-packing checks, compiler smells, and Pareto gate. |
+| `fuzz` | `goose-lit fuzz [entry.goose]` | Builds and runs SanitizerCoverage or libFuzzer fuzzing campaigns. |
+| `inspect` | `goose-lit inspect <file\|hex>` | Dumps byte buffers in hex/ASCII or 128-bit SIMD lanes. |
 | `version` | `goose-lit version` | Displays goose-lit version string. |
 | `help` | `goose-lit help` | Prints CLI usage and flag reference. |
 
-### Options and flags
+Run `goose-lit <subcommand> --help` for full per-subcommand flags.
+
+### Common options and flags
 
 | Flag | Supported in | Description |
 | :--- | :--- | :--- |
 | `--config <file>` | all | Loads custom configuration file (default: `.litconfig`). |
-| `--test-dir <dir>` | `<path>`, `test` | Overrides test root directory (default: `tests` or `tests_dir` in `.litconfig`). |
-| `--timeout <ms>` | `<path>`, `test` | Per-command execution timeout in milliseconds (default: `30000`, `0` = unlimited). |
+| `-j`, `--jobs <N>` | `<path>`, `check`, `cov` | Number of parallel worker threads. |
+| `--filter <glob>` | `<path>`, `check`, `cov`, `profile`, `sloc` | Filters targets or benchmark cases. |
+| `--fail-fast`, `-x` | `<path>`, `check` | Stops scheduling new work after the first failure. |
+| `--json` | `<path>` | Emits a structured JSON test summary. |
+| `--list-tests` | `<path>` | Lists discovered test files without executing them. |
+| `--allow-empty` | `<path>` | Returns exit code `0` when no test files are discovered. |
+| `--timeout <sec>` | `<path>`, `cov` | Per-command execution timeout in seconds (default: `60` for runner, `120` for `cov`). |
 | `--prefix <PREF>` | `filecheck` | Configures FileCheck pattern prefix (default: `CHECK`). |
-| `--verbose`, `-v` | `<path>`, `gate`, `crap` | Shows command output and execution time. |
+| `--verbose`, `-v` | `<path>` | Shows command output and execution time. |
 | `--simd [byte]` | `inspect` | Displays 128-bit SIMD lane inspection matching byte (default: `/`). |
-| `--offset <N>` | `inspect` | Sets memory offset for hexdump output. |
+| `--offset <N>` | `inspect` | Sets base memory offset for hexdump output. |
 | `--bce-lines [file]` | `crap`, `gate` | Loads compiler bounds-check elimination output or runs `goose --bce-lines` (enabled by default). |
 | `--no-bce` | `crap`, `gate` | Disables automatic `goose --bce-lines` compiler bridge. |
-| `--cov <val\|file>` | `crap`, `gate` | Sets branch coverage (`0.0..1.0`) or loads a coverage file. |
-| `--default-cov <val>`| `crap`, `gate` | Sets fallback coverage when a function has no profile data (default: `0.0`). |
-| `--threshold <val>` | `crap` | Sets G-CRAP warning threshold (default: `25.0`). |
-| `--format <fmt>` | `crap`, `gate` | Output format: `table` (default), `md`, `json`, `gcc`, or `sarif`. |
-| `--out <file>` | `crap`, `gate` | Writes report to `<file>`. |
-| `--baseline <file>` | `crap`, `gate` | Compares metrics against baseline file (default: `.lit-baseline` if present). |
-| `--no-baseline` | `crap`, `gate` | Disables automatic baseline comparison. |
-| `--save-baseline [f]`| `crap`, `gate` | Writes current metrics to baseline file (default: `.lit-baseline`). |
-| `--delta <val>` | `gate` | Allowed G-CRAP increase above baseline (default: `5.0`). |
-| `--include-tests` | `crap`, `gate` | Includes test files in analysis. |
+| `--specs [file]` | `crap`, `gate` | Loads or auto-runs `goose --specs` diagnostics. |
+| `--cov <file>` | `crap`, `gate`, `verify` | Loads a `.gcrap-cov` branch coverage profile generated by `goose-lit cov`. |
+| `--lcov <file>` | `crap`, `gate` | Loads an LCOV tracefile. |
+| `--require-cov` | `crap`, `gate`, `verify` | Fails with exit code `2` if no real coverage profile is loaded. |
+| `--explain` | `crap`, `gate` | Prints branch-level line hotspot breakdown for G-CRAP and BCE. |
+| `--threshold <val>` | `crap`, `gate` | Sets G-CRAP warning threshold (default: `25.0`). |
+| `--format <fmt>` | `crap`, `gate`, `sloc` | Output format (`table`, `md`, `json`, plus `gcc`/`sarif` for `crap`/`gate`, `tsv` for `sloc`). |
+| `--out <file>` | `crap`, `gate`, `cov`, `sloc` | Writes output report or profile to `<file>`. |
+| `--baseline <file>` | `crap`, `gate`, `sloc` | Compares metrics against baseline file (auto-detects `.lit/baseline` or `.lit-baseline`). |
+| `--no-baseline` | `crap`, `gate`, `sloc` | Disables automatic baseline comparison. |
+| `--save-baseline [f]` | `crap`, `gate`, `sloc` | Writes current metrics to baseline file. |
+| `--delta <val>` | `crap`, `gate` | Allowed G-CRAP increase above baseline (default: `5.0`). |
+| `--include-tests` | `crap`, `gate`, `sloc` | Includes test files in analysis. |
 
 ## Configuration
 
@@ -200,27 +234,35 @@ Example `.litconfig`:
 
 ```ini
 # .litconfig
-baseline = .lit-baseline
+baseline = .lit/baseline
 ceiling = 25.0
-cov = 0.85
 delta = 5.0
 format = table
 prefix = CHECK
 tests_dir = tests
 src_dir = src
+exclude = vendor/, scratch/
+jobs = 4
+timeout = 60
 include_tests = false
 ```
 
 Configuration keys:
-- `baseline`: path to baseline snapshot file for ratchet comparisons.
+- `baseline`: path to G-CRAP baseline snapshot file for ratchet comparisons.
 - `ceiling`: G-CRAP gate ceiling (default: `25.0`).
-- `cov`: default branch coverage (default: `0.0`).
 - `delta`: regression tolerance over baseline (default: `5.0`).
 - `format`: output format (`table`, `md`, `json`, `gcc`, `sarif`).
 - `prefix`: FileCheck directive prefix (default: `CHECK`).
 - `tests_dir`: directory scanned when running tests without arguments.
-- `src_dir`: target directory for G-CRAP analysis.
+- `src_dir`: target directory for G-CRAP and coverage analysis.
+- `exclude`: comma-separated directory or path prefixes skipped during discovery.
+- `cc` / `goose_cc`: C compiler path passed to `GOOSE_CC`.
+- `jobs`: default parallel worker count.
+- `timeout`: per-command timeout in seconds (default: `60`).
 - `include_tests`: include test files in complexity analysis (`true` or `false`).
+- `bce`: enable or disable automatic `goose --bce-lines` (`true` or `false`).
+- `cov_profile`, `profile_target`, `fuzz_entry`, `fuzz_extra_c`, `fuzz_extra_libs`: defaults for `cov`, `profile`, and `fuzz`.
+- `sloc_baseline`, `sloc_map`, `sloc_exclude`, `sloc_bce_entries`, `sloc_max_packing`, `sloc_max_delta`, `sloc_cycle_noise`: defaults for `sloc`.
 
 ## Directives reference
 
@@ -254,24 +296,28 @@ Inside `// RUN:` commands, goose-lit expands these substitutions:
 
 | Macro | Replacement |
 | :--- | :--- |
-| `%s` | Absolute path to the test file. |
+| `%s` | Path to the test file. |
 | `%S` | Directory containing the test file. |
-| `%t` | Temporary scratch file path (`%s.tmp`). |
-| `%lit` | Path to the goose-lit binary. |
+| `%t` | Temporary scratch file path inside `.lit/cache/`. |
+| `%lit` | Path to the running `goose-lit` binary. |
 | `%FileCheck` | Command for `goose-lit filecheck`. |
 | `%not` | Command for `goose-lit not`. |
+| `%alloc_hook` | Path to `alloc_hook.h` (resolved from disk or embedded cache). |
+| `%prof_hook` | Path to `prof_hook.h` (resolved from disk or embedded cache). |
+| `%fuzz_driver` | Path to `fuzz_driver.c` (resolved from disk or embedded cache). |
+| `%cov_rt` | Path to `cov_rt.h` (resolved from disk or embedded cache). |
 
 ### Test filtering and conditions
 
 | Directive | Description |
 | :--- | :--- |
 | `// XFAIL: <target\|*>` | Expected failure. Fails if the test passes. |
-| `// REQUIRES: <features>` | Runs the test only if the host matches the listed features (`windows`, `linux`, `macos`, `x86_64`, `arm64`, `gcc`, `clang`). |
-| `// UNSUPPORTED: <features>` | Skips the test if the host matches the listed features. |
+| `// REQUIRES: <features>` | Runs the test only if the host matches all listed features (`windows`, `linux`, `macos`, `x86_64`, `arm64`, `gcc`, `clang`, `goose`). |
+| `// UNSUPPORTED: <features>` | Skips the test if the host matches any listed feature. |
 
 ## In-process test framework
 
-When writing unit tests, table-driven suites, or component tests, import `lit` directly. Assertions, mocks, deterministic clocks, and test runners reside in `lit::`:
+When writing unit tests, table-driven suites, or component tests, import `lit` directly. Assertions, mocks, deterministic clocks, allocation counters, profiler spans, and test runners reside in `lit::`:
 
 ```goose
 // tests/unit_test.goose
@@ -309,7 +355,7 @@ Included utilities:
 - Lifecycle: `T`, `Runner`, `new_runner`, `run_case`, `run` (subtests), `run_table` (table-driven tests).
 - Mocks: `MockClock`, `MockMonoClock`, `new_mock_clock`, `advance_ms`, `advance_sec`, `spy`, `record_call`.
 - Property testing: `FuzzRng`, `new_fuzz_rng`, `next_u64`, `next_range`, `next_bool`.
-- Latency & parity: `verify_latency_budget`, `verify_slice_parity`.
+- Allocation and profiling: `alloc_reset`, `alloc_mark`, `alloc_growth`, `verify_zero_allocs`, `new_bench_suite`, `bench`, `prof_span`, `verify_latency_budget`, `verify_slice_parity`.
 - Sandboxing: `wait_contained_result`, `assert_balanced`.
 
 ## Wire verification API
@@ -340,6 +386,8 @@ fn main() {
 Documentation and examples:
 - [`docs/INTEGRATION.md`](docs/INTEGRATION.md) describes CI workflows, Justfile recipes, and decoupling in-tree test frameworks.
 - [`examples/basic_project`](examples/basic_project/) provides a sample Goose project tested with LIT.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) describes the internal module layout and verification stages.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) covers prerequisites, coding standards, and test commands.
 
 ## License
 

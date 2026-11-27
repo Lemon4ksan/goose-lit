@@ -36,11 +36,11 @@ fn test_parser() {
 
 // Option A: In-process testkit via lit import
 import std;
-import wing;
+import mypkg;
 import lit from "github.com/Lemon4ksan/goose-lit@v0.1.0";
 
 fn test_parser(t: lit::T&) {
-    let res, ok = parse_frame(buf);
+    let res, ok = mypkg::parse_frame(buf);
     lit::assert_ok(t, ok);
     lit::assert_eq(t, res.magic, 0x4757);
 }
@@ -48,10 +48,10 @@ fn test_parser(t: lit::T&) {
 // Option B: Zero-footprint LIT test with FileCheck
 // RUN: goose %s | %FileCheck %s
 import std;
-import wing;
+import mypkg;
 
 fn main() {
-    let res, ok = parse_frame(buf);
+    let res, ok = mypkg::parse_frame(buf);
     assert(ok);
     print("MAGIC: ", res.magic);
 }
@@ -84,8 +84,7 @@ fn test_framer() {
 2. Remove the `core/test/` directory (`assert.goose`, `bridge.goose`, `context.goose`, `diff.goose`, `mock.goose`, `runner.goose`).
 3. Verify typecheck cleanliness:
    ```bash
-   goose check core.goose
-   goose check wing.goose
+   goose check src.goose
    ```
 
 ## Continuous integration workflow
@@ -110,11 +109,9 @@ jobs:
         include:
           - os: ubuntu-latest
             lit-bin: goose-lit
-            archive: goose-lit-v0.1.0-linux-x64.tar.gz
             url: https://github.com/Lemon4ksan/goose-lit/releases/download/v0.1.0/goose-lit-v0.1.0-linux-x64.tar.gz
           - os: windows-latest
             lit-bin: goose-lit.exe
-            archive: goose-lit-v0.1.0-windows-x64.zip
             url: https://github.com/Lemon4ksan/goose-lit/releases/download/v0.1.0/goose-lit-v0.1.0-windows-x64.zip
 
     steps:
@@ -126,24 +123,26 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo mkdir -p /opt
-          curl -sSL https://github.com/aardappel/goose/releases/download/v2026.3/goose-v2026.3-linux-x64.tar.gz | sudo tar -xz -C /opt
-          sudo ln -sf /opt/goose-v2026.3-linux-x64/goose /usr/local/bin/goose
+          curl -sSL https://github.com/aardappel/goose/releases/download/v2026.4/goose-v2026.4-linux-x64.tar.gz | sudo tar -xz -C /opt
+          sudo ln -sf /opt/goose-v2026.4-linux-x64/goose /usr/local/bin/goose
 
       - name: Install Goose (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $gooseDir = "$HOME\.goose\goose-v2026.4-windows-x64"
           New-Item -ItemType Directory -Force -Path "$HOME\.goose" | Out-Null
-          Invoke-WebRequest -Uri "https://github.com/aardappel/goose/releases/download/v2026.3/goose-v2026.3-windows-x64.zip" -OutFile "$HOME\.goose\goose.zip"
-          Expand-Archive -Path "$HOME\.goose\goose.zip" -DestinationPath "$HOME\.goose\bin" -Force
-          "$HOME\.goose\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Invoke-WebRequest -Uri "https://github.com/aardappel/goose/releases/download/v2026.4/goose-v2026.4-windows-x64.zip" -OutFile "$HOME\.goose\goose.zip"
+          Expand-Archive -Path "$HOME\.goose\goose.zip" -DestinationPath "$HOME\.goose" -Force
+          Remove-Item "$HOME\.goose\goose.zip" -Force
+          "$gooseDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # Install prebuilt goose-lit
       - name: Install goose-lit (Linux)
         if: runner.os == 'Linux'
         run: |
-          curl -sSL "${{ matrix.url }}" | tar -xz -C /usr/local/bin
-          chmod +x /usr/local/bin/goose-lit
+          curl -sSL "${{ matrix.url }}" | sudo tar -xz -C /usr/local/bin
+          sudo chmod +x /usr/local/bin/goose-lit
 
       - name: Install goose-lit (Windows)
         if: runner.os == 'Windows'
@@ -152,15 +151,19 @@ jobs:
           New-Item -ItemType Directory -Force -Path "$HOME\.goose-lit" | Out-Null
           Invoke-WebRequest -Uri "${{ matrix.url }}" -OutFile "$HOME\.goose-lit\lit.zip"
           Expand-Archive -Path "$HOME\.goose-lit\lit.zip" -DestinationPath "$HOME\.goose-lit" -Force
+          Remove-Item "$HOME\.goose-lit\lit.zip" -Force
           "$HOME\.goose-lit" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       # Execute verification
       - name: Run LIT test suites
         run: goose-lit tests/
 
-      # Enforce G-CRAP complexity and bounds check safety gate
+      # Collect real branch coverage and enforce G-CRAP gate
+      - name: Collect branch coverage
+        run: goose-lit cov src/ --tests tests/ --out .lit/cache/cov/merged.gcrap-cov
+
       - name: Enforce G-CRAP Gate
-        run: goose-lit gate src/ 25.0 --cov 0.85
+        run: goose-lit gate src/ 25.0 --cov .lit/cache/cov/merged.gcrap-cov
 ```
 
 ## Justfile recipes
@@ -179,14 +182,23 @@ lit target="tests/":
 lit target="tests/":
     goose-lit.exe {{target}}
 
-# Enforce hardware complexity and bounds safety gate (default ceiling 25.0)
+# Enforce static complexity and bounds safety gate (default ceiling 25.0)
 [unix]
-gate target="src/" max="25" cov="0.85":
-    goose-lit gate {{target}} {{max}} --cov {{cov}}
+gate target="src/" max="25":
+    goose-lit gate {{target}} {{max}}
 
 [windows]
-gate target="src/" max="25" cov="0.85":
-    goose-lit.exe gate {{target}} {{max}} --cov {{cov}}
+gate target="src/" max="25":
+    goose-lit.exe gate {{target}} {{max}}
+
+# Collect real branch coverage and run G-CRAP gate
+[unix]
+cov target="src/" tests="tests/" max="25":
+    goose-lit cov {{target}} --tests {{tests}} --gate {{max}}
+
+[windows]
+cov target="src/" tests="tests/" max="25":
+    goose-lit.exe cov {{target}} --tests {{tests}} --gate {{max}}
 
 # Display G-CRAP risk radar table
 [unix]

@@ -34,12 +34,12 @@ lit:
 
 # Run hardware complexity gate check on target
 [unix]
-gate target="." max="25" cov="0.85":
-    ./bin/goose-lit gate {{target}} {{max}} --cov {{cov}}
+gate target="." max="25":
+    ./bin/goose-lit gate {{target}} {{max}}
 
 [windows]
-gate target="." max="25" cov="0.85":
-    .\bin\goose-lit.exe gate {{target}} {{max}} --cov {{cov}}
+gate target="." max="25":
+    .\bin\goose-lit.exe gate {{target}} {{max}}
 
 # Check SPDX Apache-2.0 license headers
 license-check:
