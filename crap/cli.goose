@@ -71,18 +71,10 @@ fn analyze_files_blob(
     var seen_hashes: u64[>..] = [];
     var seen_lens:   i64[>..] = [];
     var file_src:    u8[>..]  = [];
-    var line_start:  i64      = 0;
-    while line_start < files_blob.len {
-        var line_end = files_blob.len;
-        for j in line_start..files_blob.len {
-            if files_blob[j] == '\n' {
-                line_end = j;
-                break;
-            }
-        }
-        guard line_start >= 0 && line_end <= files_blob.len && line_start <= line_end else { break; }
-        let fpath = trim_ascii(files_blob[line_start..line_end]);
-        line_start = line_end + 1;
+    var rem = files_blob;
+    while rem.len > 0 {
+        let fpath, rest = take_next_line(rem);
+        rem = rest;
 
         if fpath.len > 0 {
             file_src.clear();
@@ -503,17 +495,10 @@ fn run_crap_cli() -> i32 {
 
     var files_blob: u8[>..] = [];
     if target_paths_blob.len > 0 {
-        var tp_start: i64 = 0;
-        while tp_start < target_paths_blob.len {
-            var tp_end = target_paths_blob.len;
-            for j in tp_start..target_paths_blob.len {
-                if target_paths_blob[j] == '\n' {
-                    tp_end = j;
-                    break;
-                }
-            }
-            let t_item = trim_ascii(target_paths_blob[tp_start..tp_end]);
-            tp_start = tp_end + 1;
+        var tp_rem: const u8[:] = target_paths_blob[..];
+        while tp_rem.len > 0 {
+            let t_item, rest = take_next_line(tp_rem);
+            tp_rem = rest;
             if t_item.len > 0 {
                 if !file_exists(t_item) && !is_dir(t_item) {
                     write_stderr("Error: target path does not exist: ");
@@ -601,15 +586,10 @@ fn run_crap_cli() -> i32 {
 
     // 5. Load coverage profile from file if specified
     if cov_files.len > 0 {
-        var cf_start: i64 = 0;
-        while cf_start < cov_files.len {
-            var cf_end = cov_files.len;
-            for j in cf_start..cov_files.len {
-                if cov_files[j] == '\n' { cf_end = j; break; }
-            }
-            guard cf_start >= 0 && cf_end <= cov_files.len && cf_start <= cf_end else { break; }
-            let cfile = trim_ascii(cov_files[cf_start..cf_end]);
-            cf_start = cf_end + 1;
+        var cf_rem: const u8[:] = cov_files[..];
+        while cf_rem.len > 0 {
+            let cfile, rest = take_next_line(cf_rem);
+            cf_rem = rest;
             guard cfile.len > 0 else { continue; }
             if slice_ends_with(cfile, ".info") || slice_ends_with(cfile, ".lcov") {
                 load_lcov_profile(cfile, pool, functions, branches);

@@ -46,8 +46,7 @@ fn arm_starts_with_cf_stmt(src: const u8[:], off: i64) -> bool {
 }
 
 fn sort_cov_edits(edits: CovEdit[>..]&) {
-    var i: i64 = 1;
-    while i < edits.len {
+    for i in 1..edits.len {
         let key = edits[i];
         var j = i - 1;
         while j >= 0 {
@@ -61,7 +60,6 @@ fn sort_cov_edits(edits: CovEdit[>..]&) {
             j--;
         }
         edits[j + 1] = key;
-        i++;
     }
 }
 

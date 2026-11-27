@@ -534,3 +534,61 @@ fn glob_match(pattern: const u8[:], text: const u8[:]) -> bool {
     }
     return pi == pattern.len;
 }
+
+// Splits `rem` at the first `delim`, returning `(trimmed_token, remaining_slice)`.
+fn take_next_delim(rem: const u8[:], delim: u8) -> const u8[:], const u8[:] {
+    let pos = slice_index_of_byte(rem, delim);
+    if pos >= 0 && pos < rem.len {
+        return trim_ascii(rem[..pos]), rem[pos + 1..];
+    }
+    return trim_ascii(rem), rem[rem.len..];
+}
+
+fn take_next_line(rem: const u8[:]) -> const u8[:], const u8[:] {
+    return take_next_delim(rem, '\n');
+}
+
+fn next_line_at(blob: const u8[:], cursor: i64&) -> const u8[:] {
+    guard cursor >= 0 && cursor < blob.len else {
+        cursor = blob.len;
+        return blob[blob.len..];
+    }
+    let line, rest = take_next_line(blob[cursor..]);
+    cursor = blob.len - rest.len;
+    return line;
+}
+
+fn blob_get_line(blob: const u8[:], idx: i32, out: u8[>..]&) -> bool {
+    var cur: i32 = 0;
+    var rem = blob;
+    while rem.len > 0 {
+        let line, rest = take_next_line(rem);
+        rem = rest;
+        if cur == idx {
+            out.append(line);
+            return out.len > 0;
+        }
+        cur++;
+    }
+    return false;
+}
+
+fn blob_contains_line(blob: const u8[:], needle: const u8[:]) -> bool {
+    guard needle.len > 0 && blob.len > 0 else { return false; }
+    var rem = blob;
+    while rem.len > 0 {
+        let line, rest = take_next_line(rem);
+        rem = rest;
+        if line == needle {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn path_matches_filter(filter_glob: const u8[:], path: const u8[:]) -> bool {
+    guard filter_glob.len > 0 else { return true; }
+    let last_sl = slice_last_index_of_byte(path, '/');
+    let base = if last_sl >= 0 && last_sl + 1 <= path.len { path[last_sl + 1..] } else { path };
+    return glob_match(filter_glob, path) || glob_match(filter_glob, base);
+}

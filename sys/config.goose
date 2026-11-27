@@ -87,18 +87,10 @@ fn append_exclude_patterns(val: const u8[:], out: u8[..1024]&) {
     if v.len >= 2 && v[0] == '[' && v[v.len - 1] == ']' {
         v = trim_ascii(v[1..v.len - 1]);
     }
-    var start: i64 = 0;
-    let n = v.len;
-    while start <= n {
-        var end = n;
-        for i in start..n {
-            if v[i] == ',' {
-                end = i;
-                break;
-            }
-        }
-        var tok = trim_ascii(v[start..end]);
-        start = end + 1;
+    var rem = v;
+    while rem.len > 0 {
+        var tok, rest = take_next_delim(rem, ',');
+        rem = rest;
         if tok.len >= 2 && tok[0] == '[' && tok[tok.len - 1] == ']' {
             tok = trim_ascii(tok[1..tok.len - 1]);
         }
@@ -137,18 +129,10 @@ fn is_excluded_path(path: const u8[:], exclude_blob: const u8[:]) -> bool {
         if b == '\\' { norm.push('/'); } else { norm.push(b); }
     }
     let rel = norm[..];
-    var start: i64 = 0;
-    let n = exclude_blob.len;
-    while start < n {
-        var end = n;
-        for i in start..n {
-            if exclude_blob[i] == '\n' {
-                end = i;
-                break;
-            }
-        }
-        let pat = trim_ascii(exclude_blob[start..end]);
-        start = end + 1;
+    var rem = exclude_blob;
+    while rem.len > 0 {
+        let pat, rest = take_next_line(rem);
+        rem = rest;
         if pat.len > 0 {
             if rel == pat { return true; }
             if slice_ends_with(pat, "/") {
@@ -409,25 +393,11 @@ fn parse_config_line(line: const u8[:], cfg: LitConfig&) {
 }
 
 // crap:trusted
-// crap:trusted-bounds
-inline fn scan_next_line(content: const u8[:], pos: i64&) -> const u8[:] {
-    let start = pos;
-    let n = content.len;
-    while pos < n && content[pos] != '\n' {
-        pos += 1;
-    }
-    let line = trim_ascii(content[start..pos]);
-    if pos < n && content[pos] == '\n' {
-        pos += 1;
-    }
-    return line;
-}
-
-// crap:trusted
 fn parse_config_content(content: const u8[:], cfg: LitConfig&) {
-    var pos: i64 = 0;
-    while pos < content.len {
-        let line = scan_next_line(content, pos);
+    var rem = content;
+    while rem.len > 0 {
+        let line, rest = take_next_line(rem);
+        rem = rest;
         if line.len > 0 {
             parse_config_line(line, cfg);
         }

@@ -34,13 +34,11 @@ fn parse_sloc_baseline(
     out = SlocBaseline { .. };
     var saw_header = false;
     var norm_buf: u8[>..] = [];
-    var start:    i64     = 0;
+    var rem = raw;
 
-    while start < raw.len {
-        let rel_nl = crap::slice_index_of_byte(raw[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { raw.len };
-        let line = crap::trim_ascii(raw[start..end]);
-        start = end + 1;
+    while rem.len > 0 {
+        let line, rest = crap::take_next_line(rem);
+        rem = rest;
         guard line.len > 0 else { continue; }
 
         if line[0] == '#' {

@@ -29,36 +29,6 @@ struct CheckWorkerCfg {
     fail_fast:     bool      = false,
 }
 
-fn check_get_line(blob: const u8[:], idx: i32, out: u8[>..]&) -> bool {
-    var cur:   i32 = 0;
-    var start: i64 = 0;
-    while start < blob.len {
-        let rel_nl = crap::slice_index_of_byte(blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { blob.len };
-        if cur == idx {
-            out.append(crap::trim_ascii(blob[start..end]));
-            return out.len > 0;
-        }
-        cur++;
-        start = end + 1;
-    }
-    return false;
-}
-
-fn check_blob_contains_line(blob: const u8[:], needle: const u8[:]) -> bool {
-    guard needle.len > 0 && blob.len > 0 else { return false; }
-    var start: i64 = 0;
-    while start < blob.len {
-        let rel_nl = crap::slice_index_of_byte(blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { blob.len };
-        if crap::trim_ascii(blob[start..end]) == needle {
-            return true;
-        }
-        start = end + 1;
-    }
-    return false;
-}
-
 fn check_join_norm(dir: const u8[:], name: const u8[:], out: u8[>..]&) {
     var raw: u8[>..] = [];
     if dir.len > 0 && dir != "." && dir != "./" {
@@ -98,7 +68,7 @@ fn check_discover_root_goose_files(dir: const u8[:], exclude_blob: const u8[:], 
         check_join_norm(dir, name, child);
         guard !is_dir(child[..]) && file_exists(child[..]) else { continue; }
         guard !crap::is_excluded_path(child[..], exclude_blob) else { continue; }
-        if !check_blob_contains_line(out[..], child[..]) {
+        if !crap::blob_contains_line(out[..], child[..]) {
             out.append(child[..]);
             out.push('\n');
         }
@@ -130,12 +100,9 @@ fn check_collect_covered_submodules(pkg_dir: const u8[:], roots_blob: const u8[:
         src.clear();
         guard read_file(cur_file, src) else { continue; }
 
-        var pos: i64 = 0;
-        while pos < src.len {
-            let nl = crap::slice_index_of_byte(src[pos..], '\n');
-            let lend = if nl >= 0 { pos + nl } else { src.len };
-            let line = crap::trim_ascii(src[pos..lend]);
-            pos = lend + 1;
+        var src_pos: i64 = 0;
+        while src_pos != src.len {
+            let line = crap::next_line_at(src[..], src_pos);
 
             guard crap::slice_starts_with(line, "import ") else { continue; }
             guard !crap::slice_contains(line, " from ") else { continue; }
@@ -162,12 +129,12 @@ fn check_collect_covered_submodules(pkg_dir: const u8[:], roots_blob: const u8[:
             check_join_norm(pkg_dir, mod_rel[..], cand);
             guard file_exists(cand[..]) && !is_dir(cand[..]) else { continue; }
 
-            if !check_blob_contains_line(roots_blob, cand[..]) &&
-               !check_blob_contains_line(covered_out[..], cand[..]) {
+            if !crap::blob_contains_line(roots_blob, cand[..]) &&
+               !crap::blob_contains_line(covered_out[..], cand[..]) {
                 covered_out.append(cand[..]);
                 covered_out.push('\n');
             }
-            if !check_blob_contains_line(visited[..], cand[..]) {
+            if !crap::blob_contains_line(visited[..], cand[..]) {
                 visited.append(cand[..]);
                 visited.push('\n');
                 queue.append(cand[..]);
@@ -193,7 +160,7 @@ fn check_discover_build_entries_in_dir(dir: const u8[:], out: u8[>..]&) {
         goose_name.append(".goose");
         cand.clear();
         check_join_norm(dir, goose_name[..], cand);
-        if file_exists(cand[..]) && !is_dir(cand[..]) && !check_blob_contains_line(out[..], cand[..]) {
+        if file_exists(cand[..]) && !is_dir(cand[..]) && !crap::blob_contains_line(out[..], cand[..]) {
             out.append(cand[..]);
             out.push('\n');
         }
@@ -211,16 +178,14 @@ fn resolve_enclosing_package_entries(
 
     var candidates: u8[>..] = [];
     var scratch:    u8[>..] = [];
-    var c_start:    i64     = 0;
-    while c_start < configured_blob.len {
-        let rel_nl = crap::slice_index_of_byte(configured_blob[c_start..], '\n');
-        let c_end = if rel_nl >= 0 { c_start + rel_nl } else { configured_blob.len };
-        let item = crap::trim_ascii(configured_blob[c_start..c_end]);
-        c_start = c_end + 1;
+    var cfg_rem = configured_blob;
+    while cfg_rem.len > 0 {
+        let item, rest = crap::take_next_line(cfg_rem);
+        cfg_rem = rest;
         guard item.len > 0 && file_exists(item) && !is_dir(item) else { continue; }
         scratch.clear();
         crap::normalize_path(item, scratch);
-        if !check_blob_contains_line(candidates[..], scratch[..]) {
+        if !crap::blob_contains_line(candidates[..], scratch[..]) {
             candidates.append(scratch[..]);
             candidates.push('\n');
         }
@@ -248,14 +213,11 @@ fn resolve_enclosing_package_entries(
 
     // Prefer entries that transitively import `norm_target`.
     // Reuse `cur_dir` for root_dir, `scratch` for single_root.
-    var matched: u8[>..] = [];
-    var covered: u8[>..] = [];
-    var s:       i64     = 0;
-    while s < candidates.len {
-        let rel_nl = crap::slice_index_of_byte(candidates[s..], '\n');
-        let e = if rel_nl >= 0 { s + rel_nl } else { candidates.len };
-        let root_fp = crap::trim_ascii(candidates[s..e]);
-        s = e + 1;
+    var matched:  u8[>..] = [];
+    var covered:  u8[>..] = [];
+    var cand_pos: i64     = 0;
+    while cand_pos != candidates.len {
+        let root_fp = crap::next_line_at(candidates[..], cand_pos);
         guard root_fp.len > 0 else { continue; }
 
         scratch.clear();
@@ -265,7 +227,7 @@ fn resolve_enclosing_package_entries(
         check_parent_dir(root_fp, cur_dir);
         covered.clear();
         check_collect_covered_submodules(cur_dir[..], scratch[..], covered);
-        if check_blob_contains_line(covered[..], norm_target[..]) {
+        if crap::blob_contains_line(covered[..], norm_target[..]) {
             matched.append(root_fp);
             matched.push('\n');
         }
@@ -316,13 +278,11 @@ fn typecheck_file_with_fallback(
     var entries: u8[>..] = [];
     guard resolve_enclosing_package_entries(fpath, configured_blob, !missing_mod, entries) else { return rc; }
 
-    var ent_out: u8[>..] = [];
-    var s:       i64     = 0;
-    while s < entries.len {
-        let rel_nl = crap::slice_index_of_byte(entries[s..], '\n');
-        let e = if rel_nl >= 0 { s + rel_nl } else { entries.len };
-        let ent = crap::trim_ascii(entries[s..e]);
-        s = e + 1;
+    var ent_out: u8[>..]     = [];
+    var ent_rem: const u8[:] = entries[..];
+    while ent_rem.len > 0 {
+        let ent, rest = crap::take_next_line(ent_rem);
+        ent_rem = rest;
         guard ent.len > 0 else { continue; }
 
         let erc = run_single_goose_check(ent, cc, ent_out);
@@ -362,7 +322,7 @@ fn check_worker_loop(cfg: CheckWorkerCfg) {
         if idx < 0 { break; }
 
         fpath.clear();
-        guard check_get_line(list_blob[..], idx, fpath) else { continue; }
+        guard crap::blob_get_line(list_blob[..], idx, fpath) else { continue; }
 
         let t0 = (monotonic_now().nanos as! i64) / 1000;
         let rc = typecheck_file_with_fallback(
@@ -464,15 +424,13 @@ fn handle_check_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&)
         }
     }
 
-    var raw_files:    u8[>..] = [];
-    var covered_blob: u8[>..] = [];
-    var dir_roots:    u8[>..] = [];
-    var t_start:      i64     = 0;
-    while t_start < cfg.targets.len {
-        let rel_nl = crap::slice_index_of_byte(cfg.targets[t_start..], '\n');
-        let t_end = if rel_nl >= 0 { t_start + rel_nl } else { cfg.targets.len };
-        let t_item = crap::trim_ascii(cfg.targets[t_start..t_end]);
-        t_start = t_end + 1;
+    var raw_files:    u8[>..]     = [];
+    var covered_blob: u8[>..]     = [];
+    var dir_roots:    u8[>..]     = [];
+    var t_rem:        const u8[:] = cfg.targets[..];
+    while t_rem.len > 0 {
+        let t_item, rest = crap::take_next_line(t_rem);
+        t_rem = rest;
         guard t_item.len > 0 else { continue; }
         guard file_exists(t_item) || is_dir(t_item) else {
             write_stdout("Error: check target not found: ");
@@ -490,29 +448,20 @@ fn handle_check_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&)
 
     var files_blob:         u8[>..] = [];
     var norm_fp:            u8[>..] = [];
-    var f_start:            i64     = 0;
     var total:              i32     = 0;
     var covered_submodules: i32     = 0;
-    while f_start < raw_files.len {
-        let rel_nl = crap::slice_index_of_byte(raw_files[f_start..], '\n');
-        let f_end = if rel_nl >= 0 { f_start + rel_nl } else { raw_files.len };
-        let fp = crap::trim_ascii(raw_files[f_start..f_end]);
-        f_start = f_end + 1;
+    var f_pos:              i64     = 0;
+    while f_pos != raw_files.len {
+        let fp = crap::next_line_at(raw_files[..], f_pos);
         guard fp.len > 0 else { continue; }
         norm_fp.clear();
         crap::normalize_path(fp, norm_fp);
-        if cfg.filter.len == 0 && check_blob_contains_line(covered_blob[..], norm_fp[..]) {
+        if cfg.filter.len == 0 && crap::blob_contains_line(covered_blob[..], norm_fp[..]) {
             covered_submodules++;
             continue;
         }
-        if cfg.filter.len > 0 {
-            let last_sl = crap::slice_last_index_of_byte(fp, '/');
-            let base = if last_sl >= 0 { fp[last_sl + 1..] } else { fp };
-            if !crap::glob_match(cfg.filter, fp) && !crap::glob_match(cfg.filter, base) {
-                continue;
-            }
-        }
-        if !check_blob_contains_line(files_blob[..], fp) {
+        guard crap::path_matches_filter(cfg.filter, fp) else { continue; }
+        if !crap::blob_contains_line(files_blob[..], fp) {
             files_blob.append(fp);
             files_blob.push('\n');
             total++;
@@ -573,7 +522,7 @@ fn handle_check_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&)
 
     for idx in total {
         fp_buf.clear();
-        let _ = check_get_line(files_blob[..], idx, fp_buf);
+        let _ = crap::blob_get_line(files_blob[..], idx, fp_buf);
         slot_p.clear();
         slot_p.append(cache_dir);
         slot_p.append("/.chk_slot_");

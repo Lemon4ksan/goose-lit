@@ -22,20 +22,10 @@ fn load_gcrap_profile(profile_path: const u8[:], branches: BranchSite[>..]&) -> 
     var content: u8[>..] = [];
     guard read_file(profile_path, content) else { return false; }
 
-    var line_start: i64 = 0;
-    let n = content.len;
-
-    while line_start < n {
-        var line_end = n;
-        for i in line_start..n {
-            if content[i] == '\n' {
-                line_end = i;
-                break;
-            }
-        }
-
-        let raw_line = trim_ascii(content[line_start..line_end]);
-        line_start = line_end + 1;
+    var rem: const u8[:] = content[..];
+    while rem.len > 0 {
+        let raw_line, rest = take_next_line(rem);
+        rem = rest;
 
         if raw_line.len == 0 || raw_line[0] == '#' {
             continue;
@@ -84,21 +74,12 @@ fn load_lcov_profile(
     var content: u8[>..] = [];
     guard read_file(lcov_path, content) else { return false; }
 
-    var cur_file:   u8[>..] = [];
-    var line_start: i64     = 0;
-    let n = content.len;
+    var cur_file: u8[>..]     = [];
+    var rem:      const u8[:] = content[..];
 
-    while line_start < n {
-        var line_end = n;
-        for i in line_start..n {
-            if content[i] == '\n' {
-                line_end = i;
-                break;
-            }
-        }
-
-        let raw_line = trim_ascii(content[line_start..line_end]);
-        line_start = line_end + 1;
+    while rem.len > 0 {
+        let raw_line, rest = take_next_line(rem);
+        rem = rest;
 
         if slice_starts_with(raw_line, "SF:") {
             cur_file.clear();

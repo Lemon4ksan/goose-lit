@@ -227,12 +227,10 @@ fn export_profile_json(tsv_raw: const u8[:], json_path: const u8[:]) -> bool {
     var out: u8[>..] = [];
     out.append("{\n  \"cases\": [\n");
     var first_case = true;
-    var start: i64 = 0;
-    while start < tsv_raw.len {
-        let rel_nl = crap::slice_index_of_byte(tsv_raw[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { tsv_raw.len };
-        let line = crap::trim_ascii(tsv_raw[start..end]);
-        start = end + 1;
+    var rem = tsv_raw;
+    while rem.len > 0 {
+        let line, rest = crap::take_next_line(rem);
+        rem = rest;
         if crap::slice_starts_with(line, "@LIT_BENCH\t") {
             if !first_case { out.append(",\n"); }
             first_case = false;
@@ -269,12 +267,10 @@ fn export_profile_markdown(tsv_raw: const u8[:], md_path: const u8[:]) -> bool {
     out.append("## Benchmark Overview\n\n");
     out.append("| Case | Iters (`N`) | `ns/op` | `cycles/op` | `MB/s` | `net B/op` | `scratch B/op` | `peak B` | `allocs/op` |\n");
     out.append("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n");
-    var start: i64 = 0;
-    while start < tsv_raw.len {
-        let rel_nl = crap::slice_index_of_byte(tsv_raw[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { tsv_raw.len };
-        let line = crap::trim_ascii(tsv_raw[start..end]);
-        start = end + 1;
+    var rem = tsv_raw;
+    while rem.len > 0 {
+        let line, rest = crap::take_next_line(rem);
+        rem = rest;
         if crap::slice_starts_with(line, "@LIT_BENCH\t") {
             out.append("| `");
             out.append(extract_tsv_col(line, 2));

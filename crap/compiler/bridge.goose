@@ -231,21 +231,12 @@ fn apply_bce_lines_blob(
     functions:   FunctionInfo[>..]&,
     branches:    BranchSite[>..]&,
 ) {
-    var line_start: i64 = 0;
-    let n = output_blob.len;
     var file_buf: u8[>..] = [];
+    var rem = output_blob;
 
-    while line_start < n {
-        var line_end = n;
-        for i in line_start..n {
-            if output_blob[i] == '\n' {
-                line_end = i;
-                break;
-            }
-        }
-
-        let raw_line = output_blob[line_start..line_end];
-        line_start = line_end + 1;
+    while rem.len > 0 {
+        let raw_line, rest = take_next_line(rem);
+        rem = rest;
 
         file_buf.clear();
         var line_num: i32 = 0;
@@ -313,25 +304,15 @@ fn apply_specs_blob(
     pool:        const u8[:],
     functions:   FunctionInfo[>..]&,
 ) {
-    var line_start: i64 = 0;
-    let n = output_blob.len;
-
     var cur_nodes: i32 = 0;
     var cur_nest:  i32 = 0;
     var cur_noinline = false;
     var pending_spec = false;
+    var rem = output_blob;
 
-    while line_start < n {
-        var line_end = n;
-        for i in line_start..n {
-            if output_blob[i] == '\n' {
-                line_end = i;
-                break;
-            }
-        }
-
-        let raw_line = trim_ascii(output_blob[line_start..line_end]);
-        line_start = line_end + 1;
+    while rem.len > 0 {
+        let raw_line, rest = take_next_line(rem);
+        rem = rest;
 
         if slice_starts_with(raw_line, "// spec ") {
             pending_spec = true;

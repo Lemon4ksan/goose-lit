@@ -78,20 +78,10 @@ fn host_has_single_feature(feat: const u8[:]) -> bool {
 }
 
 fn host_has_feature(feat: const u8[:]) -> bool {
-    let list = crap::trim_ascii(feat);
-    guard list.len > 0 else { return false; }
-    var start: i64 = 0;
-    let n = list.len;
-    while start <= n {
-        var end = n;
-        for i in start..n {
-            if list[i] == ',' {
-                end = i;
-                break;
-            }
-        }
-        let item = crap::trim_ascii(list[start..end]);
-        start = end + 1;
+    var rem = crap::trim_ascii(feat);
+    while rem.len > 0 {
+        let item, rest = crap::take_next_delim(rem, ',');
+        rem = rest;
         if item.len > 0 && host_has_single_feature(item) {
             return true;
         }
@@ -100,21 +90,11 @@ fn host_has_feature(feat: const u8[:]) -> bool {
 }
 
 fn host_has_all_features(feat: const u8[:]) -> bool {
-    let list = crap::trim_ascii(feat);
-    guard list.len > 0 else { return false; }
-    var start:   i64 = 0;
+    var rem = crap::trim_ascii(feat);
     var checked: i64 = 0;
-    let n = list.len;
-    while start <= n {
-        var end = n;
-        for i in start..n {
-            if list[i] == ',' {
-                end = i;
-                break;
-            }
-        }
-        let item = crap::trim_ascii(list[start..end]);
-        start = end + 1;
+    while rem.len > 0 {
+        let item, rest = crap::take_next_delim(rem, ',');
+        rem = rest;
         if item.len > 0 {
             checked += 1;
             if !host_has_single_feature(item) {

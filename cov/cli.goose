@@ -156,15 +156,14 @@ fn cov_collect_tests(
     out_tests:    u8[>..]&,
 ) {
     var raw_blob: u8[>..] = [];
-    var start:    i64     = 0;
-    while start < test_targets.len {
-        let rel_nl = crap::slice_index_of_byte(test_targets[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { test_targets.len };
-        let item = crap::trim_ascii(test_targets[start..end]);
-        start = end + 1;
+    var norm:     u8[>..] = [];
+    var t_rem = test_targets;
+    while t_rem.len > 0 {
+        let item, rest = crap::take_next_line(t_rem);
+        t_rem = rest;
         if item.len > 0 {
             if file_exists(item) {
-                var norm: u8[>..] = [];
+                norm.clear();
                 crap::normalize_path(item, norm);
                 raw_blob.append(norm[..]);
                 raw_blob.push('\n');
@@ -175,24 +174,14 @@ fn cov_collect_tests(
     }
 
     // Filter out helper kits, unsupported/xfail directive tests, and non-matching globs
-    var lstart: i64     = 0;
-    var src:    u8[>..] = [];
-    while lstart < raw_blob.len {
-        let rel_nl = crap::slice_index_of_byte(raw_blob[lstart..], '\n');
-        let end = if rel_nl >= 0 { lstart + rel_nl } else { raw_blob.len };
-        let fpath = crap::trim_ascii(raw_blob[lstart..end]);
-        lstart = end + 1;
+    var src:   u8[>..] = [];
+    var r_pos: i64     = 0;
+    while r_pos != raw_blob.len {
+        let fpath = crap::next_line_at(raw_blob[..], r_pos);
         guard fpath.len > 0 else { continue; }
         guard crap::slice_ends_with(fpath, ".goose") else { continue; }
         guard !crap::is_excluded_path(fpath, exclude_blob) else { continue; }
-
-        if filter_glob.len > 0 {
-            let last_sl = crap::slice_last_index_of_byte(fpath, '/');
-            let base = if last_sl >= 0 { fpath[last_sl + 1..] } else { fpath };
-            if !crap::glob_match(filter_glob, fpath) && !crap::glob_match(filter_glob, base) {
-                continue;
-            }
-        }
+        guard crap::path_matches_filter(filter_glob, fpath) else { continue; }
 
         src.clear();
         if read_file(fpath, src) {
@@ -207,22 +196,6 @@ fn cov_collect_tests(
             out_tests.push('\n');
         }
     }
-}
-
-fn cov_get_line_at(blob: const u8[:], idx: i32, out: u8[>..]&) -> bool {
-    var cur_idx: i32 = 0;
-    var start:   i64 = 0;
-    while start < blob.len {
-        let rel_nl = crap::slice_index_of_byte(blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { blob.len };
-        if cur_idx == idx {
-            out.append(crap::trim_ascii(blob[start..end]));
-            return out.len > 0;
-        }
-        cur_idx++;
-        start = end + 1;
-    }
-    return false;
 }
 
 thread_fn cov_parallel_worker(cfg: CovWorkerCfg) {
@@ -242,7 +215,7 @@ thread_fn cov_parallel_worker(cfg: CovWorkerCfg) {
         if idx < 0 { break; }
 
         test_rel.clear();
-        guard cov_get_line_at(list_blob[..], idx, test_rel) else { continue; }
+        guard crap::blob_get_line(list_blob[..], idx, test_rel) else { continue; }
 
         test_src.clear();
         let _ = read_file(test_rel[..], test_src);
@@ -465,17 +438,15 @@ fn handle_cov_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) -
 
     // 4. Instrument each analyzed file inside shadow workspace
     var file_idx:     i32                   = 0;
-    var f_start:      i64                   = 0;
     var orig_src:     u8[>..]               = [];
     var inst_src:     u8[>..]               = [];
     var file_b:       crap::BranchSite[>..] = [];
     var ws_file_path: u8[>..]               = [];
+    var f_rem:        const u8[:]           = analyzed_files_blob[..];
 
-    while f_start < analyzed_files_blob.len {
-        let rel_nl = crap::slice_index_of_byte(analyzed_files_blob[f_start..], '\n');
-        let f_end = if rel_nl >= 0 { f_start + rel_nl } else { analyzed_files_blob.len };
-        let fpath = crap::trim_ascii(analyzed_files_blob[f_start..f_end]);
-        f_start = f_end + 1;
+    while f_rem.len > 0 {
+        let fpath, rest = crap::take_next_line(f_rem);
+        f_rem = rest;
         guard fpath.len > 0 else { continue; }
 
         file_b.clear();
@@ -540,12 +511,12 @@ fn handle_cov_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) -
     }
 
     // 6. Merge profiles & inspect test results
-    var passed:    i32     = 0;
-    var failed:    i32     = 0;
-    var prof_p:    u8[>..] = [];
-    var slot_p:    u8[>..] = [];
-    var slot_data: u8[>..] = [];
-    var t_name:    u8[>..] = [];
+    var passed:    i32      = 0;
+    var failed:    i32      = 0;
+    var prof_p:    u8[..96] = [];
+    var slot_p:    u8[..96] = [];
+    var slot_data: u8[>..]  = [];
+    var t_name:    u8[>..]  = [];
 
     for idx in total_tests {
         slot_p.clear();
@@ -560,7 +531,7 @@ fn handle_cov_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) -
         } else {
             failed++;
             t_name.clear();
-            let _ = cov_get_line_at(test_files_blob[..], idx, t_name);
+            let _ = crap::blob_get_line(test_files_blob[..], idx, t_name);
             write_stdout("  [COV TEST FAIL] ");
             write_stdout(t_name[..]);
             write_stdout("\n");

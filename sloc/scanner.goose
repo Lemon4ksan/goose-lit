@@ -439,12 +439,10 @@ fn scan_sloc_files(
     dirs:       DirSlocStats[>..]&,
 ) {
     var src_buf: u8[>..] = [];
-    var start:   i64     = 0;
-    while start < paths_blob.len {
-        let rel_nl = crap::slice_index_of_byte(paths_blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { paths_blob.len };
-        let fpath = crap::trim_ascii(paths_blob[start..end]);
-        start = end + 1;
+    var rem = paths_blob;
+    while rem.len > 0 {
+        let fpath, rest = crap::take_next_line(rem);
+        rem = rest;
         guard fpath.len > 0 else { continue; }
 
         src_buf.clear();
@@ -572,12 +570,9 @@ fn collect_repo_dead_fns(
     var tokens:     crap::Token[>..]      = [];
     var pragmas:    crap::LinePragma[>..] = [];
 
-    var start: i64 = 0;
-    while start < all_paths.len {
-        let rel_nl = crap::slice_index_of_byte(all_paths[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { all_paths.len };
-        let fpath = crap::trim_ascii(all_paths[start..end]);
-        start = end + 1;
+    var p_pos: i64 = 0;
+    while p_pos != all_paths.len {
+        let fpath = crap::next_line_at(all_paths[..], p_pos);
         guard fpath.len > 0 else { continue; }
         src_buf.clear();
         guard read_file(fpath, src_buf) else { continue; }
@@ -602,12 +597,10 @@ fn collect_repo_dead_fns(
 
     // 2. Check every shipping function declaration against called_set
     var norm_path: u8[>..] = [];
-    start = 0;
-    while start < shipping_paths_blob.len {
-        let rel_nl = crap::slice_index_of_byte(shipping_paths_blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { shipping_paths_blob.len };
-        let fpath = crap::trim_ascii(shipping_paths_blob[start..end]);
-        start = end + 1;
+    var s_rem = shipping_paths_blob;
+    while s_rem.len > 0 {
+        let fpath, rest = crap::take_next_line(s_rem);
+        s_rem = rest;
         guard fpath.len > 0 else { continue; }
         src_buf.clear();
         guard read_file(fpath, src_buf) else { continue; }
@@ -674,12 +667,10 @@ fn attach_multi_entry_bce(
         run_elid.push(0);
     }
 
-    var start: i64 = 0;
-    while start < entries_blob.len {
-        let rel_nl = crap::slice_index_of_byte(entries_blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { entries_blob.len };
-        let entry = crap::trim_ascii(entries_blob[start..end]);
-        start = end + 1;
+    var e_rem = entries_blob;
+    while e_rem.len > 0 {
+        let entry, e_rest = crap::take_next_line(e_rem);
+        e_rem = e_rest;
         guard entry.len > 0 && (file_exists(entry) || is_dir(entry)) else { continue; }
 
         bce_out.clear();
@@ -698,12 +689,9 @@ fn attach_multi_entry_bce(
             run_elid[idx] = 0;
         }
 
-        var lstart: i64 = 0;
-        while lstart < bce_out.len {
-            let nl = crap::slice_index_of_byte(bce_out[lstart..], '\n');
-            let lend = if nl >= 0 { lstart + nl } else { bce_out.len };
-            let raw_line = bce_out[lstart..lend];
-            lstart = lend + 1;
+        var b_pos: i64 = 0;
+        while b_pos != bce_out.len {
+            let raw_line = crap::next_line_at(bce_out[..], b_pos);
 
             file_buf.clear();
             var lnum:   i32 = 0;
@@ -736,12 +724,10 @@ fn attach_multi_entry_bce(
 fn check_goose_format_files(paths_blob: const u8[:], failed_out: u8[>..]&) -> i64 {
     var fails:   i64     = 0;
     var tmp_out: u8[>..] = [];
-    var start:   i64     = 0;
-    while start < paths_blob.len {
-        let rel_nl = crap::slice_index_of_byte(paths_blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { paths_blob.len };
-        let fpath = crap::trim_ascii(paths_blob[start..end]);
-        start = end + 1;
+    var rem = paths_blob;
+    while rem.len > 0 {
+        let fpath, rest = crap::take_next_line(rem);
+        rem = rest;
         guard fpath.len > 0 else { continue; }
         tmp_out.clear();
         let rc = crap::exec_argv_capture("goose", "format", "--check", fpath, 0, tmp_out);

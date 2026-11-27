@@ -25,14 +25,12 @@ fn normalize_map_path(raw: const u8[:], out: u8[>..]&) {
 }
 
 fn normalize_prefix_list(raw: const u8[:], out: u8[>..]&) {
-    var start: i64 = 0;
     var first = true;
     var item_buf: u8[>..] = [];
-    while start <= raw.len {
-        let rel = crap::slice_index_of_byte(raw[start..], ',');
-        let end = if rel >= 0 { start + rel } else { raw.len };
-        let tok = crap::trim_ascii(raw[start..end]);
-        start = end + 1;
+    var rem = raw;
+    while rem.len > 0 {
+        let tok, rest = crap::take_next_delim(rem, ',');
+        rem = rest;
         guard tok.len > 0 else { continue; }
         item_buf.clear();
         normalize_map_path(tok, item_buf);
@@ -67,13 +65,11 @@ fn parse_sloc_map(raw: const u8[:], pool: u8[>..]&, maps: ScopeMapping[>..]&) ->
     var added:    i64     = 0;
     var pref_buf: u8[>..] = [];
     var b_buf:    u8[>..] = [];
-    var start:    i64     = 0;
+    var rem = raw;
 
-    while start < raw.len {
-        let rel_nl = crap::slice_index_of_byte(raw[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { raw.len };
-        let line = crap::trim_ascii(raw[start..end]);
-        start = end + 1;
+    while rem.len > 0 {
+        let line, rest = crap::take_next_line(rem);
+        rem = rest;
         guard line.len > 0 && line[0] != '#' else { continue; }
 
         let delim: u8 = if crap::slice_index_of_byte(line, '|') >= 0 { '|' } else { '\t' };
@@ -124,12 +120,10 @@ fn parse_sloc_map(raw: const u8[:], pool: u8[>..]&, maps: ScopeMapping[>..]&) ->
 
 fn parse_profile_tsv_samples(raw: const u8[:], samples: ProfileSample[>..]&) -> i64 {
     var added: i64 = 0;
-    var start: i64 = 0;
-    while start < raw.len {
-        let rel_nl = crap::slice_index_of_byte(raw[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { raw.len };
-        let line = crap::trim_ascii(raw[start..end]);
-        start = end + 1;
+    var rem = raw;
+    while rem.len > 0 {
+        let line, rest = crap::take_next_line(rem);
+        rem = rest;
 
         if crap::slice_starts_with(line, "@LIT_BENCH\t") {
             var s = ProfileSample { kind: SLOC_SCOPE_BENCH, .. };
@@ -173,12 +167,10 @@ fn path_matches_scope_prefix(fpath: const u8[:], pref: const u8[:]) -> bool {
 }
 
 fn path_matches_prefix_csv(fpath: const u8[:], csv: const u8[:]) -> bool {
-    var start: i64 = 0;
-    while start <= csv.len {
-        let rel = crap::slice_index_of_byte(csv[start..], ',');
-        let end = if rel >= 0 { start + rel } else { csv.len };
-        let pref = crap::trim_ascii(csv[start..end]);
-        start = end + 1;
+    var rem = csv;
+    while rem.len > 0 {
+        let pref, rest = crap::take_next_delim(rem, ',');
+        rem = rest;
         if pref.len > 0 && path_matches_scope_prefix(fpath, pref) {
             return true;
         }
@@ -187,23 +179,19 @@ fn path_matches_prefix_csv(fpath: const u8[:], csv: const u8[:]) -> bool {
 }
 
 fn scope_covered_by_scan(scope_csv: const u8[:], scan_prefixes_nl: const u8[:]) -> bool {
-    var s_start: i64 = 0;
     var checked: i64 = 0;
-    while s_start <= scope_csv.len {
-        let rel = crap::slice_index_of_byte(scope_csv[s_start..], ',');
-        let end = if rel >= 0 { s_start + rel } else { scope_csv.len };
-        let pref = crap::trim_ascii(scope_csv[s_start..end]);
-        s_start = end + 1;
+    var s_rem = scope_csv;
+    while s_rem.len > 0 {
+        let pref, s_rest = crap::take_next_delim(s_rem, ',');
+        s_rem = s_rest;
         guard pref.len > 0 else { continue; }
         checked += 1;
 
         var covered = false;
-        var t_start: i64 = 0;
-        while t_start < scan_prefixes_nl.len {
-            let nl = crap::slice_index_of_byte(scan_prefixes_nl[t_start..], '\n');
-            let tend = if nl >= 0 { t_start + nl } else { scan_prefixes_nl.len };
-            let target = crap::trim_ascii(scan_prefixes_nl[t_start..tend]);
-            t_start = tend + 1;
+        var t_rem = scan_prefixes_nl;
+        while t_rem.len > 0 {
+            let target, t_rest = crap::take_next_line(t_rem);
+            t_rem = t_rest;
             guard target.len > 0 else { continue; }
             if target == "." || path_matches_scope_prefix(pref, target) {
                 covered = true;
@@ -308,24 +296,11 @@ fn correlate_scopes(
     }
 }
 
-fn blob_contains_line(blob: const u8[:], needle: const u8[:]) -> bool {
-    var start: i64 = 0;
-    while start < blob.len {
-        let rel = crap::slice_index_of_byte(blob[start..], '\n');
-        let end = if rel >= 0 { start + rel } else { blob.len };
-        if crap::trim_ascii(blob[start..end]) == needle {
-            return true;
-        }
-        start = end + 1;
-    }
-    return false;
-}
-
 fn collect_unique_map_benches(maps: const ScopeMapping[:], pool: const u8[:], out_blob: u8[>..]&) {
     for &m in maps {
         guard m.bench_len > 0 else { continue; }
         let b = crap::pool_slice(pool, m.bench_off, m.bench_len);
-        if b.len > 0 && !blob_contains_line(out_blob[..], b) {
+        if b.len > 0 && !crap::blob_contains_line(out_blob[..], b) {
             out_blob.append(b);
             out_blob.push('\n');
         }
@@ -361,19 +336,17 @@ fn run_profile_benchmarks(
         cc
     };
 
-    var seen:    u8[>..] = [];
-    var cmd:     u8[>..] = [];
-    var cap_out: u8[>..] = [];
-    var tmp_tsv: u8[>..] = [];
-    var tsv_buf: u8[>..] = [];
+    var seen:    u8[>..]  = [];
+    var cmd:     u8[>..]  = [];
+    var cap_out: u8[>..]  = [];
+    var tmp_tsv: u8[..64] = [];
+    var tsv_buf: u8[>..]  = [];
 
-    var start: i64 = 0;
-    while start < bench_paths_blob.len {
-        let rel = crap::slice_index_of_byte(bench_paths_blob[start..], '\n');
-        let end = if rel >= 0 { start + rel } else { bench_paths_blob.len };
-        let bench = crap::trim_ascii(bench_paths_blob[start..end]);
-        start = end + 1;
-        guard bench.len > 0 && !blob_contains_line(seen[..], bench) else { continue; }
+    var b_rem = bench_paths_blob;
+    while b_rem.len > 0 {
+        let bench, rest = crap::take_next_line(b_rem);
+        b_rem = rest;
+        guard bench.len > 0 && !crap::blob_contains_line(seen[..], bench) else { continue; }
         seen.append(bench);
         seen.push('\n');
 

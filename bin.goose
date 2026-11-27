@@ -125,38 +125,13 @@ fn lit_status_code(st: lit::TestStatus) -> i32 {
     };
 }
 
-fn lit_get_line_at(blob: const u8[:], idx: i32, out: u8[>..]&) -> bool {
-    var cur:   i32 = 0;
-    var start: i64 = 0;
-    while start < blob.len {
-        let rel_nl = crap::slice_index_of_byte(blob[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { blob.len };
-        if cur == idx {
-            out.append(crap::trim_ascii(blob[start..end]));
-            return out.len > 0;
-        }
-        cur++;
-        start = end + 1;
-    }
-    return false;
-}
-
 fn filter_test_list(raw: const u8[:], filter_glob: const u8[:], out: u8[>..]&) -> i32 {
     var total: i32 = 0;
-    var start: i64 = 0;
-    while start < raw.len {
-        let rel_nl = crap::slice_index_of_byte(raw[start..], '\n');
-        let end = if rel_nl >= 0 { start + rel_nl } else { raw.len };
-        let fp = crap::trim_ascii(raw[start..end]);
-        start = end + 1;
-        guard fp.len > 0 else { continue; }
-        if filter_glob.len > 0 {
-            let last_sl = crap::slice_last_index_of_byte(fp, '/');
-            let base = if last_sl >= 0 { fp[last_sl + 1..] } else { fp };
-            if !crap::glob_match(filter_glob, fp) && !crap::glob_match(filter_glob, base) {
-                continue;
-            }
-        }
+    var rem = raw;
+    while rem.len > 0 {
+        let fp, rest = crap::take_next_line(rem);
+        rem = rest;
+        guard fp.len > 0 && crap::path_matches_filter(filter_glob, fp) else { continue; }
         out.append(fp);
         out.push('\n');
         total++;
@@ -180,7 +155,7 @@ thread_fn lit_parallel_worker(cfg: LitWorkerCfg) {
         if idx < 0 { break; }
 
         fpath.clear();
-        guard lit_get_line_at(list_blob[..], idx, fpath) else { continue; }
+        guard crap::blob_get_line(list_blob[..], idx, fpath) else { continue; }
 
         var res = lit::TestResult { .. };
         let _ = lit::run_single_lit_test_with_timeout(fpath[..], cfg.verbose, cfg.timeout_sec, res);
@@ -199,6 +174,68 @@ thread_fn lit_parallel_worker(cfg: LitWorkerCfg) {
         slot_path.append(".res");
         let _ = write_file(slot_path[..], slot_buf[..]);
     }
+}
+
+fn record_and_print_test_outcome(
+    sc:                i64,
+    fpath:             const u8[:],
+    dur_us:            i64,
+    diag:              const u8[:],
+    json_out:          bool,
+    passed_count:      i64&,
+    failed_count:      i64&,
+    xfail_count:       i64&,
+    xpass_count:       i64&,
+    unsupported_count: i64&,
+) -> bool {
+    var is_fail = false;
+    var tag: const u8[:] = "  [FAIL] ";
+    var show_ms = false;
+    var show_diag = false;
+
+    if sc == 0 {
+        passed_count += 1;
+        tag = "  [PASS] ";
+        show_ms = true;
+    } else if sc == 2 {
+        xfail_count += 1;
+        tag = "  [XFAIL] ";
+        show_ms = true;
+    } else if sc == 4 {
+        unsupported_count += 1;
+        tag = "  [UNSUPPORTED] ";
+    } else if sc == 5 {
+        failed_count += 1;
+        is_fail = true;
+        tag = "  [TIMEOUT] ";
+        show_diag = true;
+    } else if sc == 3 {
+        xpass_count += 1;
+        failed_count += 1;
+        is_fail = true;
+        tag = "  [XPASS] ";
+        show_diag = true;
+    } else {
+        failed_count += 1;
+        is_fail = true;
+        show_diag = true;
+    }
+
+    if !json_out {
+        write_stdout(tag);
+        write_stdout(fpath);
+        if show_ms {
+            var ms_b: u8[..48] = [];
+            format(ms_b, " (", dur_us / 1000, " ms)\n");
+            write_stdout(ms_b[..]);
+        } else {
+            write_stdout("\n");
+        }
+        if show_diag && diag.len > 0 {
+            write_stdout(diag);
+        }
+    }
+    return is_fail;
 }
 
 fn run_lit_suite(
@@ -354,13 +391,13 @@ fn run_lit_suite(
             let _ = thread_wait(tids[ti], why);
         }
 
-        var fp_buf:    u8[>..] = [];
-        var slot_path: u8[>..] = [];
-        var slot_data: u8[>..] = [];
+        var fp_buf:    u8[>..]  = [];
+        var slot_path: u8[..64] = [];
+        var slot_data: u8[>..]  = [];
 
         for idx in total {
             fp_buf.clear();
-            let _ = lit_get_line_at(test_files[..], idx, fp_buf);
+            let _ = crap::blob_get_line(test_files[..], idx, fp_buf);
             slot_path.clear();
             slot_path.append(".lit/cache/.lit_slot_");
             format(slot_path, idx);
@@ -378,173 +415,75 @@ fn run_lit_suite(
                 let sc, _ = crap::parse_i64_slice(sc_str);
                 let dur_us, _ = crap::parse_i64_slice(dur_str);
                 total_time_us += dur_us;
-
-                if sc == 0 {
-                    passed_count += 1;
-                    if !json_out {
-                        var line: u8[>..] = [];
-                        line.append("  [PASS] ");
-                        line.append(fp_buf[..]);
-                        format(line, " (", dur_us / 1000, " ms)\n");
-                        write_stdout(line[..]);
-                    }
-                } else if sc == 2 {
-                    xfail_count += 1;
-                    if !json_out {
-                        var line: u8[>..] = [];
-                        line.append("  [XFAIL] ");
-                        line.append(fp_buf[..]);
-                        format(line, " (", dur_us / 1000, " ms)\n");
-                        write_stdout(line[..]);
-                    }
-                } else if sc == 4 {
-                    unsupported_count += 1;
-                    if !json_out {
-                        write_stdout("  [UNSUPPORTED] ");
-                        write_stdout(fp_buf[..]);
-                        write_stdout("\n");
-                    }
-                } else if sc == 5 {
-                    failed_count += 1;
-                    if !json_out {
-                        write_stdout("  [TIMEOUT] ");
-                        write_stdout(fp_buf[..]);
-                        write_stdout("\n");
-                        write_stdout(diag);
-                    }
-                } else if sc == 3 {
-                    xpass_count += 1;
-                    failed_count += 1;
-                    if !json_out {
-                        write_stdout("  [XPASS] ");
-                        write_stdout(fp_buf[..]);
-                        write_stdout("\n");
-                        write_stdout(diag);
-                    }
-                } else {
-                    failed_count += 1;
-                    if !json_out {
-                        write_stdout("  [FAIL] ");
-                        write_stdout(fp_buf[..]);
-                        write_stdout("\n");
-                        write_stdout(diag);
-                    }
-                }
+                let _ = record_and_print_test_outcome(
+                    sc,
+                    fp_buf[..],
+                    dur_us,
+                    diag,
+                    json_out,
+                    passed_count,
+                    failed_count,
+                    xfail_count,
+                    xpass_count,
+                    unsupported_count,
+                );
             }
         }
         if file_exists(list_path) { delete_file(list_path); }
     } else {
-        var cur: i64 = 0;
-        let n = test_files.len;
-        while cur < n {
-            let start = cur;
-            while cur < n && test_files[cur] != '\n' { cur += 1; }
-            let t_file = test_files[start..cur];
-            cur += 1;
+        var rem_tests: const u8[:] = test_files[..];
+        while rem_tests.len > 0 {
+            let t_file, rest = crap::take_next_line(rem_tests);
+            rem_tests = rest;
             guard t_file.len > 0 else { continue; }
 
             var res = lit::TestResult { .. };
             let _ = lit::run_single_lit_test_with_timeout(t_file, verbose, lit_cfg.timeout_sec, res);
             total_time_us += res.duration_us;
-
-            if res.status == lit::TestStatus.Pass {
-                passed_count += 1;
-                if !json_out {
-                    write_stdout("  [PASS] ");
-                    write_stdout(t_file);
-                    write_stdout(" (");
-                    var ms_b: u8[..32] = [];
-                    format(ms_b, res.duration_us / 1000);
-                    write_stdout(ms_b[..]);
-                    write_stdout(" ms)\n");
-                }
-            } else if res.status == lit::TestStatus.XFail {
-                xfail_count += 1;
-                if !json_out {
-                    write_stdout("  [XFAIL] ");
-                    write_stdout(t_file);
-                    write_stdout(" (");
-                    var ms_b: u8[..32] = [];
-                    format(ms_b, res.duration_us / 1000);
-                    write_stdout(ms_b[..]);
-                    write_stdout(" ms)\n");
-                }
-            } else if res.status == lit::TestStatus.Unsupported {
-                unsupported_count += 1;
-                if !json_out {
-                    write_stdout("  [UNSUPPORTED] ");
-                    write_stdout(t_file);
-                    write_stdout("\n");
-                }
-            } else if res.status == lit::TestStatus.Timeout {
-                failed_count += 1;
-                if !json_out {
-                    write_stdout("  [TIMEOUT] ");
-                    write_stdout(t_file);
-                    write_stdout("\n");
-                    write_stdout(res.diag[..]);
-                }
-                if fail_fast { break; }
-            } else if res.status == lit::TestStatus.XPass {
-                xpass_count += 1;
-                failed_count += 1;
-                if !json_out {
-                    write_stdout("  [XPASS] ");
-                    write_stdout(t_file);
-                    write_stdout("\n");
-                    write_stdout(res.diag[..]);
-                }
-                if fail_fast { break; }
-            } else {
-                failed_count += 1;
-                if !json_out {
-                    write_stdout("  [FAIL] ");
-                    write_stdout(t_file);
-                    write_stdout("\n");
-                    write_stdout(res.diag[..]);
-                }
-                if fail_fast { break; }
-            }
+            let is_fail = record_and_print_test_outcome(
+                lit_status_code(res.status),
+                t_file,
+                res.duration_us,
+                res.diag[..],
+                json_out,
+                passed_count,
+                failed_count,
+                xfail_count,
+                xpass_count,
+                unsupported_count,
+            );
+            if is_fail && fail_fast { break; }
         }
     }
 
     if json_out {
-        var jb: u8[>..] = [];
-        jb.append("{\"passed\": ");
-        format(jb, passed_count, ", \"failed\": ", failed_count, ", \"xfailed\": ", xfail_count);
-        format(jb, ", \"unsupported\": ", unsupported_count, ", \"duration_ms\": ", total_time_us / 1000, "}\n");
+        var jb: u8[..256] = [];
+        format(
+            jb,
+            "{\"passed\": ", passed_count,
+            ", \"failed\": ", failed_count,
+            ", \"xfailed\": ", xfail_count,
+            ", \"unsupported\": ", unsupported_count,
+            ", \"duration_ms\": ", total_time_us / 1000,
+            "}\n",
+        );
         write_stdout(jb[..]);
         return if failed_count == 0 && xpass_count == 0 { 0 } else { 1 };
     }
 
-    write_stdout("-----------------------------------------------------------------------\n");
-    write_stdout("Test Summary: ");
-    var p_b: u8[..32] = [];
-    format(p_b, passed_count);
-    write_stdout(p_b[..]);
-    write_stdout(" passed, ");
-    var f_b: u8[..32] = [];
-    format(f_b, failed_count);
-    write_stdout(f_b[..]);
-    write_stdout(" failed, ");
-    var x_b: u8[..32] = [];
-    format(x_b, xfail_count);
-    write_stdout(x_b[..]);
-    write_stdout(" xfailed, ");
-    var u_b: u8[..32] = [];
-    format(u_b, unsupported_count);
-    write_stdout(u_b[..]);
-    write_stdout(" unsupported in ");
-    var tot_ms_b: u8[..32] = [];
-    format(tot_ms_b, total_time_us / 1000);
-    write_stdout(tot_ms_b[..]);
-    write_stdout(" ms\n");
+    var sum_b: u8[..256] = [];
+    format(
+        sum_b,
+        "-----------------------------------------------------------------------\nTest Summary: ",
+        passed_count, " passed, ",
+        failed_count, " failed, ",
+        xfail_count, " xfailed, ",
+        unsupported_count, " unsupported in ",
+        total_time_us / 1000, " ms\n",
+    );
+    write_stdout(sum_b[..]);
 
-    if failed_count == 0 && xpass_count == 0 {
-        return 0;
-    } else {
-        return 1;
-    }
+    return if failed_count == 0 && xpass_count == 0 { 0 } else { 1 };
 }
 
 fn main() {
@@ -601,11 +540,9 @@ fn main() {
             return;
         }
         var cmd_str: u8[>..] = [];
-        var idx:     i64     = 2;
-        while idx < all_args.len {
+        for idx in 2..all_args.len {
             if idx > 2 { cmd_str.push(' '); }
             cmd_str.append(all_args[idx]);
-            idx++;
         }
         var run_out: u8[>..] = [];
         let rc = crap::exec_capture(cmd_str[..], run_out);

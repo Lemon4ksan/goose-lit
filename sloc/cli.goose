@@ -324,12 +324,10 @@ fn parse_sloc_cli_args(
 fn targets_are_full_repo(targets_blob: const u8[:]) -> bool {
     var count: i64 = 0;
     var all_dot = true;
-    var start: i64 = 0;
-    while start < targets_blob.len {
-        let nl = crap::slice_index_of_byte(targets_blob[start..], '\n');
-        let end = if nl >= 0 { start + nl } else { targets_blob.len };
-        let t = crap::trim_ascii(targets_blob[start..end]);
-        start = end + 1;
+    var rem = targets_blob;
+    while rem.len > 0 {
+        let t, rest = crap::take_next_line(rem);
+        rem = rest;
         guard t.len > 0 else { continue; }
         count += 1;
         if t != "." && t != "./" {
@@ -346,23 +344,19 @@ fn collect_dedup_sloc_files(
     out_blob:      u8[>..]&,
 ) {
     var raw_paths: u8[>..] = [];
-    var start:     i64     = 0;
-    while start < targets_blob.len {
-        let nl = crap::slice_index_of_byte(targets_blob[start..], '\n');
-        let end = if nl >= 0 { start + nl } else { targets_blob.len };
-        let target = crap::trim_ascii(targets_blob[start..end]);
-        start = end + 1;
+    var t_rem = targets_blob;
+    while t_rem.len > 0 {
+        let target, t_rest = crap::take_next_line(t_rem);
+        t_rem = t_rest;
         guard target.len > 0 else { continue; }
         raw_paths.clear();
         crap::collect_goose_files_filtered(target, include_tests, exclude_blob, raw_paths);
 
-        var pstart: i64 = 0;
-        while pstart < raw_paths.len {
-            let pnl = crap::slice_index_of_byte(raw_paths[pstart..], '\n');
-            let pend = if pnl >= 0 { pstart + pnl } else { raw_paths.len };
-            let fpath = crap::trim_ascii(raw_paths[pstart..pend]);
-            pstart = pend + 1;
-            if fpath.len > 0 && !blob_contains_line(out_blob[..], fpath) {
+        var p_rem: const u8[:] = raw_paths[..];
+        while p_rem.len > 0 {
+            let fpath, p_rest = crap::take_next_line(p_rem);
+            p_rem = p_rest;
+            if fpath.len > 0 && !crap::blob_contains_line(out_blob[..], fpath) {
                 out_blob.append(fpath);
                 out_blob.push('\n');
             }
@@ -377,12 +371,10 @@ fn collect_default_bce_entries(targets_blob: const u8[:], out_entries: u8[>..]&)
     }
     var entries: u8[>..] = [];
     guard list_dir(".", entries) else { return; }
-    var start: i64 = 0;
-    while start < entries.len {
-        let nl = crap::slice_index_of_byte(entries[start..], '\n');
-        let end = if nl >= 0 { start + nl } else { entries.len };
-        let name = crap::trim_ascii(entries[start..end]);
-        start = end + 1;
+    var e_rem: const u8[:] = entries[..];
+    while e_rem.len > 0 {
+        let name, rest = crap::take_next_line(e_rem);
+        e_rem = rest;
         let ok = crap::slice_ends_with(name, ".goose") &&
             !crap::slice_ends_with(name, "_test.goose") &&
             !crap::slice_starts_with(name, "test_");
@@ -483,15 +475,14 @@ fn handle_sloc_cli(all_args: const (u8[:])[:], lit_cfg: const crap::LitConfig&) 
     }
 
     // Collect profile TSV samples (from --profile and/or --run-profile)
-    var tsv_all: u8[>..] = [];
-    var pstart:  i64     = 0;
-    while pstart < profile_tsvs_blob.len {
-        let nl = crap::slice_index_of_byte(profile_tsvs_blob[pstart..], '\n');
-        let end = if nl >= 0 { pstart + nl } else { profile_tsvs_blob.len };
-        let tsv_p = crap::trim_ascii(profile_tsvs_blob[pstart..end]);
-        pstart = end + 1;
+    var tsv_all: u8[>..]     = [];
+    var one_tsv: u8[>..]     = [];
+    var p_rem:   const u8[:] = profile_tsvs_blob[..];
+    while p_rem.len > 0 {
+        let tsv_p, rest = crap::take_next_line(p_rem);
+        p_rem = rest;
         guard tsv_p.len > 0 else { continue; }
-        var one_tsv: u8[>..] = [];
+        one_tsv.clear();
         guard read_file(tsv_p, one_tsv) else {
             write_stdout("Error: failed to read profile TSV: ");
             write_stdout(tsv_p);

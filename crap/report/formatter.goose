@@ -23,10 +23,9 @@ fn sort_functions_by_gcrap(functions: const FunctionInfo[:], order: i32[>..]&) {
     }
 
     // Insertion sort (deterministic, fast for diagnostic report lists)
-    var i: i64 = 1;
-    while i < order.len {
+    for i in 1..order.len {
         let key_idx = order[i];
-        guard key_idx >= 0 && key_idx < functions.len else { i++; continue; }
+        guard key_idx >= 0 && key_idx < functions.len else { continue; }
         let key_score = safe_sort_score(functions[key_idx].g_crap);
         var j: i64 = i - 1;
         while j >= 0 {
@@ -39,9 +38,8 @@ fn sort_functions_by_gcrap(functions: const FunctionInfo[:], order: i32[>..]&) {
             order[j + 1] = cur_idx;
             j--;
         }
-        guard j + 1 >= 0 && j + 1 < order.len else { i++; continue; }
+        guard j + 1 >= 0 && j + 1 < order.len else { continue; }
         order[j + 1] = key_idx;
-        i++;
     }
 }
 
