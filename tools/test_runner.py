@@ -55,9 +55,12 @@ def find_goose_binary() -> str:
         return binary
     home = Path.home()
     if platform.system() == "Windows":
-        cand = home / ".goose" / "goose-v2026.3-windows-x64" / "goose.exe"
-        if cand.exists():
-            return str(cand)
+        goose_root = home / ".goose"
+        if goose_root.is_dir():
+            for cand_dir in sorted(goose_root.glob("goose-*-windows-x64"), reverse=True):
+                cand = cand_dir / "goose.exe"
+                if cand.exists():
+                    return str(cand)
     return "goose"
 
 

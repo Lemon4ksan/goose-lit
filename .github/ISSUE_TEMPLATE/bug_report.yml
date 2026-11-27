@@ -42,6 +42,6 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: "OS, Goose compiler version (`goose version`), C compiler (gcc, clang)."
+      description: "OS, Goose compiler version (`goose --version`), C compiler (gcc, clang)."
     validations:
       required: true

@@ -234,7 +234,7 @@ def process_file(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Enforce license headers across goose-wing codebase."
+        description="Enforce license headers across goose-lit codebase."
     )
     parser.add_argument(
         "--check",

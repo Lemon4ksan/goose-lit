@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  push:
+    branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -35,7 +38,7 @@ jobs:
 
       - name: Run ruff
         run: |
-          ruff check tools/
+          ruff check tools/ scripts/
 
   c-shims:
     name: Compile C shims
@@ -51,12 +54,12 @@ jobs:
 
       - name: Compile with gcc
         run: |
-          gcc -Wall -Wextra -Werror -c shim/proc.c
+          gcc -std=c11 -Wall -Wextra -Werror -c shim/proc.c shim/profiler.c shim/fuzz_driver.c
           rm -f *.o
 
       - name: Compile with clang
         run: |
-          clang -Wall -Wextra -Werror -c shim/proc.c
+          clang -std=c11 -Wall -Wextra -Werror -c shim/proc.c shim/profiler.c shim/fuzz_driver.c
           rm -f *.o
 
   verify:
@@ -81,8 +84,8 @@ jobs:
         with:
           path: |
             ~/.goose
-            /opt/goose-v2026.3-linux-x64
-          key: ${{ runner.os }}-goose-v2026.3
+            /opt/goose-v2026.4-linux-x64
+          key: ${{ runner.os }}-goose-v2026.4
 
       - name: Install build tools and C compiler (Linux)
         if: runner.os == 'Linux'
@@ -93,26 +96,26 @@ jobs:
       - name: Bootstrap Goose compiler (Linux)
         if: runner.os == 'Linux'
         run: |
-          if [ ! -f /opt/goose-v2026.3-linux-x64/goose ]; then
+          if [ ! -f /opt/goose-v2026.4-linux-x64/goose ]; then
             sudo mkdir -p /opt
-            curl -sSL --retry 5 --retry-delay 2 --retry-connrefused https://github.com/aardappel/goose/releases/download/v2026.3/goose-v2026.3-linux-x64.tar.gz | sudo tar -xz -C /opt
+            curl -sSL --retry 5 --retry-delay 2 --retry-connrefused https://github.com/aardappel/goose/releases/download/v2026.4/goose-v2026.4-linux-x64.tar.gz | sudo tar -xz -C /opt
           fi
-          sudo ln -sf /opt/goose-v2026.3-linux-x64/goose /usr/local/bin/goose
+          sudo ln -sf /opt/goose-v2026.4-linux-x64/goose /usr/local/bin/goose
 
       - name: Bootstrap Goose compiler (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $gooseDir = "$HOME\.goose\goose-v2026.3-windows-x64"
+          $gooseDir = "$HOME\.goose\goose-v2026.4-windows-x64"
           if (-not (Test-Path "$gooseDir\goose.exe")) {
             New-Item -ItemType Directory -Force -Path "$HOME\.goose" | Out-Null
             $zipPath = "$HOME\.goose\goose.zip"
-            Invoke-WebRequest -Uri "https://github.com/aardappel/goose/releases/download/v2026.3/goose-v2026.3-windows-x64.zip" -OutFile $zipPath
+            Invoke-WebRequest -Uri "https://github.com/aardappel/goose/releases/download/v2026.4/goose-v2026.4-windows-x64.zip" -OutFile $zipPath
             Expand-Archive -Path $zipPath -DestinationPath "$HOME\.goose" -Force
             Remove-Item $zipPath -Force
             if (-not (Test-Path "$gooseDir\goose.exe")) {
               New-Item -ItemType Directory -Force -Path $gooseDir | Out-Null
-              Move-Item "$HOME\.goose\*" "$gooseDir\" -Exclude "goose-v2026.3-windows-x64" -Force
+              Move-Item "$HOME\.goose\*" "$gooseDir\" -Exclude "goose-v2026.4-windows-x64" -Force
             }
           }
           "$gooseDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -124,6 +127,17 @@ jobs:
       - name: Execute test runner
         run: |
           python tools/test_runner.py
+
+      - name: Verify example project (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./bin/goose-lit examples/basic_project/tests
+
+      - name: Verify example project (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\bin\goose-lit.exe examples\basic_project\tests
 
       - name: Run G-CRAP risk analysis and generate SARIF
         if: runner.os == 'Linux'
