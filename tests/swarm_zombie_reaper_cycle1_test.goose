@@ -4,7 +4,7 @@
 // RUN: goose %s
 import std;
 import os;
-import lit from "..";
+import cli from "..";
 
 fn test_bug1_config_bracketed_exclude_list() {
     var cfg = crap::LitConfig { .. };

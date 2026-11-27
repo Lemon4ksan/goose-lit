@@ -3,7 +3,7 @@
 
 // tests/swarm_page_fault_cycle2_test.goose
 import std;
-import lit from "..";
+import cli from "..";
 
 fn test_cycle2_finding1_guard_stack_and_match_parens(t: lit::T&) {
     let src_guards = """

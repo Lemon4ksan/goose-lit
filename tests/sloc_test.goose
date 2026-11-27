@@ -12,7 +12,7 @@
 
 import std;
 import os;
-import lit from "..";
+import cli from "..";
 
 fn test_sloc_and_guard_stmts() {
     let src: const u8[:] = "// leading comment\n\nextern fn ext_f(x: i64) = \"c_ext\";\nfn take_cb(cb: fn(i64), x: i64) -> bool {\n    // inline comment\n    guard x > 0 else { return false; }\n    let a = x + 1;\n    return a > 0;\n}\n";

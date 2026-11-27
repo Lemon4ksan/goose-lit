@@ -4,7 +4,7 @@
 // RUN: goose %s | %FileCheck %s
 
 import std;
-import lit from "..";
+import cli from "..";
 
 fn test_parse_config() {
     var cfg = crap::LitConfig { .. };
@@ -109,6 +109,43 @@ fn test_parse_config() {
     assert(ok_abs);
     assert(abs_buf.len > 9);
     assert(crap::slice_ends_with(abs_buf[..], "bin.goose"));
+
+    // Verify OS-specific cc override precedence, jobs = auto, check_entries, and RAM-aware jobs
+    var os_cfg = crap::LitConfig { .. };
+    crap::parse_config_line("cc = generic-cc", os_cfg);
+    assert(os_cfg.cc_buf == "generic-cc");
+    let host_os = crap::native_host_os();
+    if host_os == 1 {
+        crap::parse_config_line("cc_linux = linux-only-cc", os_cfg);
+        assert(os_cfg.cc_buf == "generic-cc");
+        crap::parse_config_line("cc_windows = win-special-cc", os_cfg);
+        assert(os_cfg.cc_buf == "win-special-cc");
+    } else if host_os == 2 {
+        crap::parse_config_line("cc_windows = win-only-cc", os_cfg);
+        assert(os_cfg.cc_buf == "generic-cc");
+        crap::parse_config_line("cc_linux = lin-special-cc", os_cfg);
+        assert(os_cfg.cc_buf == "lin-special-cc");
+    } else if host_os == 3 {
+        crap::parse_config_line("cc_linux = lin-only-cc", os_cfg);
+        assert(os_cfg.cc_buf == "generic-cc");
+        crap::parse_config_line("cc_macos = mac-special-cc", os_cfg);
+        assert(os_cfg.cc_buf == "mac-special-cc");
+    }
+    // Generic `cc` listed after an OS-specific key must not overwrite it.
+    crap::parse_config_line("cc = fallback-cc", os_cfg);
+    if host_os >= 1 && host_os <= 3 {
+        assert(os_cfg.cc_os_specific);
+        assert(os_cfg.cc_buf != "fallback-cc");
+    }
+
+    crap::parse_config_line("jobs = auto", os_cfg);
+    assert(os_cfg.has_jobs && os_cfg.jobs_auto);
+    let auto_j = crap::default_auto_jobs(2200);
+    assert(auto_j >= 1 && auto_j <= 4);
+
+    crap::parse_config_line("check_entries = lit.goose, cli.goose", os_cfg);
+    assert(crap::slice_contains(os_cfg.check_entries_buf[..], "lit.goose"));
+    assert(crap::slice_contains(os_cfg.check_entries_buf[..], "cli.goose"));
 }
 
 fn main() {

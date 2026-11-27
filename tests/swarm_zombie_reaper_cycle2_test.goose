@@ -4,7 +4,7 @@
 // RUN: goose %s
 import std;
 import os;
-import lit from "..";
+import cli from "..";
 
 fn dummy_fuzz_target(buf: const u8[:]) -> bool {
     return false;

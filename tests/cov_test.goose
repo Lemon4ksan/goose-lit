@@ -18,7 +18,7 @@
 // STATIC: Coverage mode:           static
 
 import std;
-import lit from "..";
+import cli from "..";
 
 fn main() {
     let sample: const u8[:] = "fn demo(x: i64) -> i64 {\n    if x > 0 {\n        return 1;\n    }\n    return 0;\n}\n";

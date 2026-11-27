@@ -4,7 +4,7 @@
 // tests/filecheck_test.goose - Unit tests for FileCheck engine.
 // RUN: goose check %s
 import std;
-import lit from "..";
+import cli from "..";
 
 fn main() {
     // 1. Basic matching

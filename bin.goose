@@ -4,7 +4,7 @@
 // goose-lit CLI entry point: Integrated LLVM-grade testing runtime for Goose.
 import std;
 import os;
-import lit from ".";
+import cli from ".";
 
 extern fn sys_exit(code: i32) = "exit";
 
@@ -29,7 +29,7 @@ fn print_usage() {
     write_stdout("  version, -V, --version Print version\n");
     write_stdout("  help, -h, --help       Print this help message\n\n");
     write_stdout("Options:\n");
-    write_stdout("  -j, --jobs <N>         Number of parallel workers (default: auto / .litconfig)\n");
+    write_stdout("  -j, --jobs <N|auto>    Parallel workers ('auto' caps by CPU & free RAM; default: 1 / .litconfig)\n");
     write_stdout("  --filter <glob>        Filter test or source paths by wildcard glob (*, ?)\n");
     write_stdout("  --fail-fast, -x        Stop scheduling new tests after first failure\n");
     write_stdout("  --json                 Emit structured JSON test summary\n");
@@ -322,6 +322,8 @@ fn run_lit_suite(
 
     let eff_jobs = if jobs > 0 {
         jobs
+    } else if jobs < 0 || lit_cfg.jobs_auto {
+        crap::default_auto_jobs(2200)
     } else if lit_cfg.has_jobs && lit_cfg.jobs > 0 {
         lit_cfg.jobs
     } else {
@@ -784,17 +786,22 @@ fn main() {
             json_out = true;
         } else if a == "-j" || a == "--jobs" {
             guard idx + 1 < all_args.len else {
-                write_stdout("Error: --jobs requires a positive integer\n");
+                write_stdout("Error: --jobs requires a positive integer or 'auto'\n");
                 sys_exit(2);
                 return;
             }
-            let j_val, ok = crap::parse_i64_slice(all_args[idx + 1]);
-            guard ok && j_val > 0 else {
-                write_stdout("Error: --jobs must be a positive integer\n");
-                sys_exit(2);
-                return;
+            let j_arg = all_args[idx + 1];
+            if j_arg == "auto" {
+                jobs = -1;
+            } else {
+                let j_val, ok = crap::parse_i64_slice(j_arg);
+                guard ok && j_val > 0 else {
+                    write_stdout("Error: --jobs must be a positive integer or 'auto'\n");
+                    sys_exit(2);
+                    return;
+                }
+                jobs = j_val;
             }
-            jobs = j_val;
             idx++;
         } else if a == "--filter" {
             guard idx + 1 < all_args.len else {

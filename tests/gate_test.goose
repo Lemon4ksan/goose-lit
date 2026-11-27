@@ -4,7 +4,7 @@
 // RUN: %lit gate %s 50 | %FileCheck %s
 
 import std;
-import lit from "..";
+import cli from "..";
 
 fn clean_simple_function(x: i64) -> i64 {
     if x > 10 {

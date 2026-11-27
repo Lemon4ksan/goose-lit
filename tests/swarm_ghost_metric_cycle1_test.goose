@@ -5,7 +5,7 @@
 
 import std;
 import os;
-import lit from "..";
+import cli from "..";
 
 fn test_bug1_bridge_bce_guard_depth_hijack_and_colon_drop() {
     let src = "fn packet_handler(buf: const u8[:], idx: i64) -> u8 {\n    guard buf.len > 4 else { return 0; }\n    guard idx >= 0 else { return 0; }\n    if idx > 100 {\n        return buf[idx];\n    }\n    return buf[0];\n}\n";

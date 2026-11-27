@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Lemon4ksan
+
+// goose-lit CLI build configuration sidecar.
+// Configures C11 process execution, allocation counter, and profiler runtime shims.
+c_sources_windows = ["shim/proc.c", "shim/alloc_count.c", "shim/profiler.c"];
+c_sources_linux = ["shim/proc.c", "shim/alloc_count.c", "shim/profiler.c"];
+c_sources_macos = ["shim/proc.c", "shim/alloc_count.c", "shim/profiler.c"];
+c_flags_cc_windows = ["-mstackrealign", "-Wl,--stack,33554432"];
+c_flags_msvc = ["/std:c11", "/STACK:33554432"];
+exclude = ["scratch", "bin"];

@@ -3,7 +3,7 @@
 
 // tests/swarm_page_fault_cycle1_test.goose
 import std;
-import lit from "..";
+import cli from "..";
 
 fn test_finding1_analyzer_state_desync(t: lit::T&) {
     let sample_goose = """

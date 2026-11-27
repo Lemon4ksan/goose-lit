@@ -96,6 +96,7 @@ def main() -> int:
     root_dir = Path(__file__).resolve().parent.parent
     tests_dir = root_dir / "tests"
     lit_file = root_dir / "lit.goose"
+    cli_file = root_dir / "cli.goose"
     bin_file = root_dir / "bin.goose"
 
     goose = find_goose_binary()
@@ -108,10 +109,10 @@ def main() -> int:
     print(cyan(bold("goose-lit test runner")))
 
     # 1. Typecheck library and CLI
-    print(f"\n{yellow('[1/4] Typechecking lit.goose and bin.goose...')}")
+    print(f"\n{yellow('[1/4] Typechecking lit.goose, cli.goose, and bin.goose...')}")
     t0_check = time.perf_counter()
 
-    for target in [lit_file, bin_file]:
+    for target in [lit_file, cli_file, bin_file]:
         code, out, err = run_command([goose, "check", str(target)], cwd=root_dir)
         if code != 0:
             print(red(f"FATAL: goose check {target.name} failed!"))
@@ -122,7 +123,7 @@ def main() -> int:
             return 1
 
     dt_check_ms = int((time.perf_counter() - t0_check) * 1000)
-    print(green(f"  OK: lit.goose and bin.goose typechecked cleanly in {dt_check_ms}ms."))
+    print(green(f"  OK: lit.goose, cli.goose, and bin.goose typechecked cleanly in {dt_check_ms}ms."))
 
     # 2. Discover test files
     if not tests_dir.exists():

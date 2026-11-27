@@ -5,7 +5,7 @@
 
 import std;
 import os;
-import lit from "..";
+import cli from "..";
 
 fn test_cycle2_bug1_specs_blob_sname_hijack_and_leaky_state() {
     var pool:      u8[>..]                 = [];
