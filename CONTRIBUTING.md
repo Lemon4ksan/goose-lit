@@ -1,16 +1,27 @@
 # Contributing to goose-lit
 
-This document covers engineering invariants, repository layout, and testing workflows for `goose-lit`.
+This document covers engineering invariants, repository layout, and testing
+workflows for `goose-lit`.
 
 ## Engineering invariants
 
-`goose-lit` is an external test harness, FileCheck matcher, coverage runner, profiler, fuzzer, and static complexity analyzer written in [Goose](https://github.com/aardappel/goose). Contributions must follow these rules:
+`goose-lit` is an external test harness, FileCheck matcher, coverage runner,
+profiler, fuzzer, and static complexity analyzer written in
+[Goose](https://github.com/aardappel/goose). Contributions must follow these
+rules:
 
-1. Keep production targets decoupled: `goose-lit` is invoked as a CLI or imported only from test files, never linked into production libraries.
-2. Keep the byte-slice ABI boundary (`const u8[:]`) between test harnesses and verified targets.
-3. Avoid dynamic allocations (`[>..]`) on wire inspection, prefix slicing, mutation, and FileCheck matching hot paths; use stack-allocated bounded arrays (`u8[..N]`) and borrowed slices.
-4. Keep C11 shims in `shim/` portable across Windows, Linux, and macOS, compiling cleanly under `-std=c11 -Wall -Wextra -Werror` on GCC and Clang.
-5. Keep embedded runtime shims (`shim/alloc_hook.h`, `shim/prof_hook.h`, `shim/cov_rt.h`, `shim/fuzz_driver.c`) self-contained so standalone release binaries work without a source checkout.
+1. Keep production targets decoupled: run `goose-lit` as a CLI or import `lit`
+   only in test files. Never link it into production libraries.
+2. Keep the byte-slice ABI boundary (`const u8[:]`) between test harnesses and
+   verified targets.
+3. Avoid dynamic allocations (`[>..]`) on wire inspection, prefix slicing,
+   mutation, and FileCheck hot paths. Use stack-allocated bounded arrays
+   (`u8[..N]`) and borrowed slices.
+4. Keep C11 shims in `shim/` portable across Windows, Linux, and macOS,
+   compiling cleanly under `-std=c11 -Wall -Wextra -Werror` on GCC and Clang.
+5. Keep embedded runtime shims (`shim/alloc_hook.h`, `shim/prof_hook.h`,
+   `shim/cov_rt.h`, `shim/fuzz_driver.c`) self-contained so standalone release
+   binaries work without a source checkout.
 
 ## Prerequisites
 
@@ -50,7 +61,8 @@ goose-lit/
 
 ### 1. Typechecking
 
-Verify `lit.goose`, `bin.goose`, and all test suites without compiling binaries:
+Verify `lit.goose`, `cli.goose`, `bin.goose`, and all test suites without a full
+binary build:
 
 ```bash
 python tools/test_runner.py --check-only
@@ -79,7 +91,8 @@ python tools/test_runner.py --pattern "*sloc*"
 
 ### 3. Formatting, linting, and license headers
 
-Format all `.goose` files, lint Python tools, and check Apache-2.0 SPDX headers before committing:
+Format all `.goose` files, lint Python tools, and check Apache-2.0 SPDX headers
+before each commit:
 
 ```bash
 goose format .
@@ -96,5 +109,6 @@ If new files are missing SPDX headers, run `python tools/licensing.py --fix`.
 - [ ] `goose format --check .` reports zero unformatted files.
 - [ ] `python tools/licensing.py --check` reports zero violations.
 - [ ] `ruff check tools/ scripts/` passes cleanly.
-- [ ] Modified C shims compile cleanly with `-std=c11 -Wall -Wextra -Werror`.
-- [ ] Commit messages follow Conventional Commits (`feat:`, `fix:`, `refactor:`, `perf:`, `style:`, `test:`, `chore:`).
+- [ ] Changed C shims compile cleanly with `-std=c11 -Wall -Wextra -Werror`.
+- [ ] Commit messages follow Conventional Commits (`feat:`, `fix:`, `refactor:`,
+  `perf:`, `style:`, `test:`, `chore:`).

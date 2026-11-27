@@ -1,22 +1,30 @@
 # Integrating goose-lit into Goose projects
 
-This guide covers CI workflows, Justfile recipes, and how to test Goose libraries without compiling test frameworks into production binaries.
+This guide covers CI workflows, Justfile recipes, and testing Goose libraries
+without test frameworks inside production binaries.
 
 ## Zero-footprint testing
 
 ### Problems with bundled test frameworks
 
-When a library exports test harnesses from its core modules (for example, `core/test/` imported inside `core.goose`):
-- Assertion helpers, string formatters, and mock structs compile into release binaries.
-- Tests written against internal mock structures do not verify raw wire bytes, which can mask framing bugs and slice boundary errors.
+When a library exports test harnesses from its core modules (for example,
+`core/test/` imported inside `core.goose`):
+
+- Assertion helpers, string formatters, and mock structs compile into release
+  binaries.
+- Tests written against internal mock structures do not verify raw wire bytes,
+  which can mask framing bugs and slice boundary errors.
 - Test utilities clutter the public module namespace.
 
 ### The zero-footprint model
 
 In this model:
+
 - Production modules contain no test runners, mocks, or assertion functions.
-- Test files are standalone `.goose` programs executed as separate processes. goose-lit verifies standard output against `// CHECK:` patterns.
-- Stream verification (`lit::verify_split_stream`) and mutation (`lit::mutate_stream`) run only in test binaries.
+- Test files are standalone `.goose` programs executed as separate processes.
+  goose-lit verifies standard output against `// CHECK:` patterns.
+- Stream verification (`lit::verify_split_stream`) and mutation
+  (`lit::fuzz_payload_stream`) run only in test binaries.
 
 ### Removing in-tree test code
 
@@ -24,7 +32,9 @@ Follow these steps to eliminate an in-tree test directory:
 
 #### Step 1: Migrate in-tree tests to lit
 
-Migrate tests using custom assertions (`assert_eq`, `assert_true`) or mock clocks by importing `lit` in test files instead of bundling an in-tree test framework inside library sources:
+Migrate tests that use custom assertions (`assert_eq`, `assert_true`) or mock
+clocks. Import `lit` in test files instead of an in-tree test framework inside
+library sources:
 
 ```goose
 // Before (in-tree framework bundled inside library core.goose):
@@ -60,7 +70,8 @@ fn main() {
 
 #### Step 2: Move wire tests to external test files
 
-For protocol framing and partial-slice tests, import `lit` inside test files (e.g. `tests/lit/verify_wire.goose`), not in library sources:
+For protocol framing and partial-slice tests, import `lit` inside test files
+(e.g. `tests/lit/verify_wire.goose`), not in library sources:
 
 ```goose
 // RUN: goose check %s
@@ -78,18 +89,24 @@ fn test_framer() {
 #### Step 3: Delete the test directory and remove the import
 
 1. In the main module, remove the test import:
+
    ```diff
    - import core.test;
    ```
-2. Remove the `core/test/` directory (`assert.goose`, `bridge.goose`, `context.goose`, `diff.goose`, `mock.goose`, `runner.goose`).
+
+2. Remove the `core/test/` directory (`assert.goose`, `bridge.goose`,
+   `context.goose`, `diff.goose`, `mock.goose`, `runner.goose`).
+
 3. Verify typecheck cleanliness:
+
    ```bash
    goose check src.goose
    ```
 
 ## Continuous integration workflow
 
-Add this workflow (`.github/workflows/lit.yml`) to run tests and enforce G-CRAP safety gates in GitHub Actions:
+Add this workflow (`.github/workflows/lit.yml`) to run tests and enforce G-CRAP
+safety gates in GitHub Actions:
 
 ```yaml
 name: Test Verification
@@ -216,7 +233,12 @@ filecheck target:
 
 ## Example project
 
-A minimal example project is located in [`examples/basic_project`](../examples/basic_project/):
-- [`examples/basic_project/.litconfig`](../examples/basic_project/.litconfig): configuration file setting test directory and gate defaults.
-- [`examples/basic_project/sample.goose`](../examples/basic_project/sample.goose): library module with no test dependencies.
-- [`examples/basic_project/tests/verify_sample.goose`](../examples/basic_project/tests/verify_sample.goose): external verification test specifying `// RUN: goose %s | %FileCheck %s`.
+Find a minimal example project in
+[`examples/basic_project`](../examples/basic_project/):
+
+- [`examples/basic_project/.litconfig`](../examples/basic_project/.litconfig):
+  configuration file setting test directory and gate defaults.
+- [`examples/basic_project/sample.goose`](../examples/basic_project/sample.goose):
+  library module with no test dependencies.
+- [`examples/basic_project/tests/verify_sample.goose`](../examples/basic_project/tests/verify_sample.goose):
+  external verification test specifying `// RUN: goose %s | %FileCheck %s`.

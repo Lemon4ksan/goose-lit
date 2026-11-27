@@ -1,15 +1,43 @@
 # Architecture
 
-goose-lit is a test runtime, FileCheck matcher, branch coverage collector, stage profiler, coverage-guided fuzzer, binary stream verifier, and G-CRAP / SLOC analyzer for Goose. It operates as an external tool for Goose repositories (such as `goose-wing` and third-party packages) without adding library dependencies to production targets.
+goose-lit is a test runtime, FileCheck matcher, branch coverage collector, stage
+profiler, coverage-guided fuzzer, binary stream verifier, and G-CRAP / SLOC
+analyzer for Goose. It operates as an external tool for Goose repositories (such
+as `goose-wing` and third-party packages) and adds no library dependencies to
+production targets.
 
-The contract between a target codebase and goose-lit consists of command-line calls and borrowed byte slices (`const u8[:]`).
+The contract between a target codebase and goose-lit consists of command-line
+calls and borrowed byte slices (`const u8[:]`).
+
+## Public API boundary
+
+Because Goose exposes every top-level declaration in imported modules without a
+`private` keyword, goose-lit enforces the public boundary at the package facade:
+
+- Public library facade: [`lit.goose`](lit.goose) exports only public symbols in
+  `namespace lit;` (`testkit/*`, `wire/*`, and minimal `sys/time.goose` clock
+  primitives). Internal helper plumbing inside those modules lives in
+  `namespace lit_internal;`.
+- Public CLI contract: `goose-lit` subcommands, flags, exit codes, `.litconfig`
+  keys, FileCheck directives, and `// RUN:` substitutions.
+- Internal implementation: [`cli.goose`](cli.goose) and `namespace crap;` are
+  internal to the binary. The CLI subdirectories (`check/`, `cov/`, `crap/`,
+  `fuzz/`, `profile/`, `runner/`, `sloc/`, `sys/`, `shim/`) carry no API
+  stability guarantees.
 
 ## Execution and isolation
 
 goose-lit uses language features of Goose to verify targets:
-- In-process test isolation: the runner executes tests using `thread_spawn_contained`. If a test worker aborts from an out-of-bounds access, an integer overflow, or an assertion failure, the runner catches the abort and reports the failure without terminating the runner process.
-- Virtual page-boundary simulation: binary stream tests place buffers at the end of a 64 KB memory page (`65536 - len`) and supply sliced prefixes to detect buffer overreads.
-- Embedded runtime shims: `alloc_hook.h`, `prof_hook.h`, `cov_rt.h`, and `fuzz_driver.c` are compiled into the CLI via `embed_file` and materialized into `.lit/cache/shim/` when a standalone release binary runs outside a source checkout.
+
+- In-process test isolation: the runner executes tests with
+  `thread_spawn_contained`. When a test worker aborts on a bounds trap, integer
+  overflow, or assertion failure, the runner catches the abort and keeps the
+  runner process alive.
+- Virtual page-boundary simulation: binary stream tests place buffers at the end
+  of a 64 KB page (`65536 - len`) and pass sliced prefixes to detect overreads.
+- Embedded runtime shims: the CLI embeds `alloc_hook.h`, `prof_hook.h`,
+  `cov_rt.h`, and `fuzz_driver.c` through `embed_file`. Standalone binaries
+  unpack them into `.lit/cache/shim/` when no source checkout exists.
 
 ## Four-layer verification pipeline
 
@@ -127,7 +155,9 @@ goose-lit/
 ## Subsystems
 
 ### FileCheck engine (`check/filecheck.goose`)
+
 Implements eight matching directives:
+
 - `CHECK:`: matches a substring or pattern on or after the current line.
 - `CHECK-NEXT:`: matches on the line immediately after the previous match.
 - `CHECK-NOT:`: confirms a pattern does not appear before the next match.
@@ -138,12 +168,22 @@ Implements eight matching directives:
 - `CHECK-COUNT-<N>:`: matches a pattern `<N>` times on consecutive lines.
 
 ### Wire testing (`wire/`)
-- `verify_split_stream`: calls a decoder on each slice prefix from length 1 up to length $N - 1$. The test fails if a prefix causes an abort or returns an unexpected status code.
-- `fuzz_payload_stream`: applies bit flips, extreme byte values (0x00, 0xFF, 0x7F, 0x80), 16-bit and 32-bit boundary integers, and byte swaps.
+
+- `verify_split_stream`: calls a decoder on each slice prefix from length 1 up
+  to length $N - 1$. The test fails if a prefix causes an abort or returns an
+  unexpected status code.
+- `fuzz_payload_stream`: applies bit flips, extreme byte values (0x00, 0xFF,
+  0x7F, 0x80), 16-bit and 32-bit boundary integers, and byte swaps.
 
 ### G-CRAP risk radar (`crap/`)
-Evaluates risk using cyclomatic complexity, real branch coverage (`.gcrap-cov` or LCOV), and compiler reports:
-$$\text{CRAP}(m) = \text{CC}(m)^2 \cdot (1 - \text{Cov}(m))^3 + \text{CC}(m)$$
-$$G\text{-CRAP}(m) = \text{CRAP}(m) + \alpha \cdot \text{UnprovenBCE}(m) + \beta \cdot \text{UncheckedArith}(m)$$
 
-Functions containing unproven bounds checks (`bce:keep`) in uncovered code are classified as `PANIC_HAZARD` to catch boundary bugs during static analysis.
+Evaluates risk from cyclomatic complexity, real branch coverage (`.gcrap-cov` or
+LCOV), and compiler reports:
+
+$$\text{CRAP}(m) = \text{CC}(m)^2 \cdot (1 - \text{Cov}(m))^3 + \text{CC}(m)$$
+
+$$G\text{-CRAP}(m) = \text{CRAP}(m) + \alpha \cdot \text{UnprovenBCE}(m) + \beta
+\cdot \text{UncheckedArith}(m)$$
+
+The analyzer marks functions with unproven bounds checks (`bce:keep`) in
+uncovered code as `PANIC_HAZARD` to catch boundary bugs during static analysis.
